@@ -1,0 +1,397 @@
+---
+title: OCR, NER, and Data Privacy
+author: Kyle Hooks
+date: '2019-11-29'
+slug: ocr-ner-and-data-privacy
+categories:
+  - blog
+tags:
+  - ocr
+  - image processing
+  - ner
+  - nlp
+  - python
+  
+clearReading: true
+autoThumbnailImage: false
+thumbnailImagePosition: "top"
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/v1575076409/ocr_cover_vposfw.png
+coverSize: partial
+metaAlignment: center
+coverMeta: out
+comments: no
+description:  "Combining OCR and NER to redact sensitive information on document images."
+---
+
+
+# The Idea #
+
+Recently, I became inspired by this [presentation](https://www.slideshare.net/MichaelHecht11/deep-learning-for-nlp-in-reinsurance) to try something I've never done before: combine [OCR](https://en.wikipedia.org/wiki/Optical_character_recognition) and [NER](https://en.wikipedia.org/wiki/Named-entity_recognition) to redact sensitive information within document images. More specifically, to do this when you don't explicitly know where that information lies on the image ahead of time.
+
+Doing so proved trickier than I initially thought, but even so the following steps describe the main components of the task to be performed:
+
+* extract text and associated metadata (pixel coordinates, etc.) from the document image via an OCR engine ([Tesseract](https://github.com/tesseract-ocr/tesseract/blob/master/README.md)), 
+* run this text through a NER model ([spaCy](https://spacy.io/usage/spacy-101)) to flag entities (i.e. a person's name) of interest,
+* and finally mask the entities in the image using the pixel coordinates of the text. 
+
+
+Before tackling this problem, it is important to define the information that could be considered sensitive and a candidate for redacting.
+ 
+
+# What Information is Sensitive? #
+
+There are several guidelines, regulations, laws, etc. that define and tabulate data that could be considered *sensitive*, such as HIPAA, GDPR, and more. For this post, I will narrow the focus to **PII** (Personally Identifiable Information) and the definition provided by [NIST](http://www.nist.gov/):
+
+> PII is any information about an individual maintained by an agency, including (1) any information that can be used to distinguish or trace an individual‘s identity, such as name, social security number, date and place of birth, mother‘s maiden name, or biometric records; and (2) any other information that is **linked** or **linkable** to an individual, such as medical, educational, financial, and employment information.
+
+The above definition is fairly broad and far reaching, but it is important to note the two buckets of PII - linked and linkable - and what information falls underneath both.
+
+## Linked Information ##
+
+Simply put, linked information is any personal information that can directly identify an indiviual given no other information about that individual.
+
+## Linkable Information ##
+
+In contrast to linked information, linkable information is any personal information that when combined with other personal information can identify an individual.
+
+Given the nature of the two definitions, it's impossible to create an exhaustive list of linked and linkable data. However, there are some common types for both.
+
+|Linked                    | Linkable                               |
+|--------------------------|----------------------------------------|
+|Full name                 |First or last name (if common)          |
+|Home address              |Country, state, city, postcode          |
+|Email address             |Gender                                  |
+|Social security number    |Race                                    |
+|Passport number           |Age range or category (30-40, 50+, etc.)|
+|Driver’s license number   |Job title and employer                  |
+|Credit card number(s)     |                                        |
+|Date of birth             |                                        |
+|Telephone Number          |                                        |
+|Account log in details    |                                        |
+
+
+# Scoping the Data #
+
+It would be very admirable to attempt and cover all the data described previously, however, for this post I will not be doing that. Instead, I will focus on a subset of data types and a rather contrived document example in order to facilitate the idea of not knowing the location of the data beforehand. For the data itself, I want to emphasize the use of NER, but will also look at some simple pattern matching as well. With that in mind, the data I will attempt to redact are 
+
+* Person name
+* Email address
+* Home address
+* Telephone number
+
+all from a sample contact card I found via google images. Let's get started!
+
+
+
+# Basic Contact Card #
+
+
+To start, let's import some python packages necessary for working with images. I'll be using [scikit-image](https://scikit-image.org/) primarily, but will also use PIL/pillow for feeding images into the tesseract engine.
+
+
+```{python}
+#load skimage for image processing
+import skimage.io as io
+#load image module for converting numpy arrays to images
+from PIL import Image
+```
+
+Once those packages are loaded we can load and display the image.
+
+```{python}
+#read in image
+img = io.imread("data/contact_info.png")
+#print image dimensions
+print(img.shape)
+
+#display image
+io.imshow(img)
+io.show()
+
+#display a portion image array
+type(img)
+```
+
+In addition to displaying the image, I printed out the image dimensions (406, 434, 3) and the class type (numpy array).
+If you are unfamiliar with image dimensions in skimage, the first two numbers represent the height and width of an image in pixels, while the third number represents the number of channels. Here, the number of channels is 3, which indicates our image is in color (RGB). The class type is important for later when we need to feed the image into tesseract, as this will need to be converted from an array to a PIL image.
+
+With the image loaded, let's throw caution to the wind and see if we can extract the image text with tesseract. In order to call the tesseract engine in python, I'll be using [pytesseract](https://pypi.org/project/pytesseract/).
+
+```{python}
+#load python interface for tesseract
+import pytesseract
+```
+
+
+```{python echo = FALSE}
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+```
+
+```{python}
+#run ocr over image and inspect the output
+doc = pytesseract.image_to_string(Image.fromarray(img), lang="eng")
+print(doc)
+```
+
+As we can see, the results are far from perfect.  There is a decent chunk of text missing, including contact info and websites. To try and improve the extraction, one adjustment to make is convert the image from color to grayscale. There's many good reasons for working with images in grayscale, such as it's computationally less expensive and reduces extraneous noise in the image.
+
+Skimage supports this conversion via the rgb2gray function, however this can also be accomplished by reading the image in and specifying as_gray=True.
+
+```{python}
+#read in image
+img = io.imread("data/contact_info.png", as_gray=True)
+#print image dimensions
+print(img.shape)
+
+#display image
+io.imshow(img)
+io.show()
+
+```
+
+With the image reloaded, let's try running OCR again. One important note, the pixel intensities for grayscale images in skimage are *normalized* to be between 0-1, rather than 0-255. It's helpful to de-normalize the image prior to inputing into tesseract, as shown in the code below.
+
+```{python}
+#run ocr over image and inspect the output
+doc = pytesseract.image_to_string(Image.fromarray(img * 255.), lang="eng")
+print(doc)
+```
+
+As shown, just by converting from RBG to grayscale, the OCR extraction results were much better. For our purposes, the only text that did not come through completely unscathed was the mailing address, where Smithville lost both l's in the extraction. To improve the results further, upscaling is another simple techique that may work. 
+
+For now, let's continue to spaCy and see how the NER model performs.
+
+Once the text is extracted, running the NER model is very simple: load the model and input the corpus (text) into the model.
+
+```{python eval}
+#load spacy and NER model
+import spacy
+import en_core_web_sm
+
+nlp = en_core_web_sm.load()
+#run model over OCR text
+spacy_doc = nlp(doc)
+```
+
+Having run the model, we can inspect the results to see what parts of the text was tagged with an entity and the associated enity label.
+
+```{python  }
+for ent in spacy_doc.ents:
+    print(ent.text,  ent.label_)
+```
+
+The full list of entity types and description can be found [here](https://spacy.io/api/annotation) under the **Named Entity Recognition** Section, but for our purposes the most important ones are PERSON and GPE. In addition to assigning an entity label to a word or words, spaCy also has boolean flags for string patterns, such as email addresses.
+
+```{python}
+for token in spacy_doc:
+  if token.like_email:
+    print(token)
+```
+
+With those results, it's worth taking a step back to unpack everything. 
+
+First of all, John Smith, johnsmith and John Smith's all being labeled **PERSON** is exactly what we want. Sure, there are some false positives (Ido, Skype, and Googie) but if the cost of redacting information is we sometimes overdo it then that's OK. Hell, we even got Mahatms Gandhi and Lead Designer, which do represent people even if it's not relevant for our use case. Additionally, using the like_email attribute was able to detect john@johnsmith.com. 
+
+That said, there are still some challenges to be solved. The first, and simplest, is phone number, as these are all of the form XXX-XXX-XXXX. SpaCy's Matcher module will suffice to mark these. 
+
+```{python }
+#import Matcher module from spacy
+from spacy.matcher import Matcher
+
+#create instance of matcher
+matcher = Matcher(nlp.vocab)
+#create pattern for telephone number's of the form ###-###-####
+pattern = [{"SHAPE": "ddd"}, {"ORTH": "-"}, {"SHAPE": "ddd"},
+           {"ORTH": "-"}, {"SHAPE": "dddd"}]
+#add pattern to matcher           
+matcher.add("PHONE_NUMER", None, pattern)          
+```
+
+
+Now that the telephone pattern is created, we can run it over the text.
+
+```{python }
+#load corpus into matcher
+matches = matcher(spacy_doc)
+
+
+#iterate over matches
+for match_id, start, end in matches:
+    #slice out match using indexes
+    span = spacy_doc[start:end]
+    #save result
+    print(span.text)
+    
+
+```
+
+
+Perfect! Consulting the original image, there are four phone numbers (office, cell, home, and fax) so everything was caught.
+
+Now for the hard part, how to mask the entire address? Well one glimmer of hope is Smithvie (correctly spelled as Smithville) was tagged as a GPE, which is spaCy's label for cities, states and countries.
+
+```{python}
+for ent in spacy_doc.ents:
+    if ent.label_ == "GPE":
+      print(ent.text,  ent.label_)
+```
+
+A naive approach to detect the entire address is simply consider all tokens within a range before and after GPE's as part of the home address,
+
+```{python}
+for token in spacy_doc:
+  if token.text == 'Smithvie':
+    print(spacy_doc[token.i-4:token.i+4].text)
+```
+ 
+and this works fine for this document, but it's inelegant and prone to unnecessary false positives. A better approach is to combine the NER and Matcher, using our knowledge of how addresses are generally formatted:
+
+
+```{python}
+#create pattern for matching generic address format
+pattern2 = [{"IS_DIGIT":True}, {"IS_ALPHA":True}, {"IS_ALPHA":True}, {},  
+            {"ENT_TYPE":"GPE"}, {"ORTH":","}, {"IS_ALPHA":True, "LENGTH":2}, 
+            {"IS_DIGIT":True, "LENGTH":5}]
+
+matcher.add("ADDRESSES", None, pattern2)
+
+matches = matcher(spacy_doc)
+for match_id, start, end in matches:
+  span=spacy_doc[start:end]
+  print(span.text)
+```
+
+The pattern above is working under the assumption the **City** portion of a home address was correctly labeled as GPE by the NER model. Given this assumption, the matcher is looking at the tokens before a GPE and checking if there is a numeric string, followed by two character strings (i.e. 123 Main Street). The matcher is also looking after the GPE for a "," followed by a character string of length 2 (NY) and a numeric string of length 5 (11111). Admittedly, even this pattern doesn't capture more general cases, such as apartment #'s or zip codes with an additional 4 digits at the end. 
+
+If we had several documents with different home addresses, an even better approach would be to create a custom named entity and train the spaCy model to recognize addresses automatically. For now, let's carry on as we're almost ready to redact the image.
+
+The code below aggregates together all text to be redacted, splitting tokens that comprise multiple components into individual pieces (John Smith -> John, Smith). 
+
+```{python}
+#find entities with label PERSON and split each name on spaces
+persons = [w for ent in spacy_doc.ents if ent.label_ == "PERSON" for w in ent.text.split()]
+
+#find tokens with like_email attribute set to TRUE
+emails = [token.text for token in spacy_doc if token.like_email]
+
+matched_patterns =[]
+#create list of matched patterns for telephone numbers and home address
+for match_id, start, end in matches:
+  span=spacy_doc[start:end]
+  matched_patterns.append(span.text)
+
+#split matches on spaces (primarily for splitting home address)
+patterns_split = [word for token in matched_patterns for word in token.split()]
+
+persons        
+emails 
+patterns_split
+```
+
+
+One more bit of processing is to reduce any duplicate information. 
+
+
+
+```{python }
+#remove duplicates
+persons = list(set(persons))
+emails = list(set(emails))
+patterns_split = list(set(patterns_split))
+
+print(persons)
+print(emails)
+print(patterns_split)
+```
+
+Finally, I'm going to run tesseract again, but calling the image_to_data method instead. This method provides metadata on top of the text extracted, included the bounding box coordinates for each piece of text extracted, saved as a python dictionary.
+
+
+```{python}
+from pytesseract import Output
+
+d = pytesseract.image_to_data(Image.fromarray(img*255), output_type=Output.DICT)
+```
+
+
+With all the pieces in place, let's redact the image.
+
+```{python eval = FALSE}
+#create list of all text to be redacted
+all_tokens = []
+all_tokens.extend(persons)
+all_tokens.extend(emails)
+all_tokens.extend(patterns_split)
+
+#iterate through text to redact
+for token in all_tokens:
+  #iterate through ocr data
+  for i, v in enumerate(d['text']):
+    #if ocr text matches text to redact
+    if v == token
+      #extract bounding box coordinates of text
+      x, y  = d['left'][i], d['top'][i]
+      w, h = d['width'][i], d['height'][i]
+      #shade all pixels in bounding box to black
+      img[y:y+h, x:x+w] = 0
+
+
+```
+
+```{python eval = FALSE, echo=FALSE}
+import numpy as np
+all_tokens = []
+all_tokens.extend(persons)
+all_tokens.extend(emails)
+all_tokens.extend(patterns_split)
+
+imgs = [np.copy(img)]
+for token in all_tokens:
+  for i, v in enumerate(d['text']):
+    if v == token:
+      x, y,  = d['left'][i], d['top'][i]
+      w, h = d['width'][i], d['height'][i]
+      img[y:y+h, x:x+w] = 0
+      tmp = np.copy(img)
+      imgs.append(tmp)
+      
+      
+# Create the frames
+frames = []
+
+for image in imgs:
+    new_frame = Image.fromarray(image * 255)
+    frames.append(new_frame)
+
+
+# Save into a GIF file that loops forever
+frames[0].save('redaction.gif', format='GIF', append_images=frames[1:], save_all=True, duration=300, loop=0)
+```
+
+
+And the results....
+
+
+![](https://res.cloudinary.com/zeucebag/image/upload/v1575501845/redaction_ehqddm.gif)
+
+
+
+We have successfully redacted all sensitive information within the image. 
+
+# Wrap Up #
+
+In this post, we were able to:
+
+* retrieve text from a document image via OCR,
+* subset the text for sensitive data through a combination of NER and pattern matching,
+* and redact that sensitive data in the document image.
+
+While I find this very satisfying, it is worth pointing out this is one single image on a very simple example. Additionally, the results weren't perfect. In a real scenario, it would be important to critically review these results and decide what errors are acceptable and what should be fine-tuned. 
+
+In my next post, I'll revisit this approach and see how it performs on a more complex document. Until then, thanks for following along!
+
+
+
+
+
+

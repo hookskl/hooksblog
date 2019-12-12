@@ -1,0 +1,931 @@
+---
+title: "Now You've Got Something to Pie Chart!!!"
+author: "Kyle Hooks"
+date: '2018-03-08'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+comments: no
+coverCaption: Randy Blythe being very positive.
+coverImage: //res.cloudinary.com/zeucebag/image/upload/v1520543846/randy_blythe_nycweo.jpg
+coverMeta: out
+coverSize: partial
+categories: 
+ - data analysis
+metaAlignment: center
+clearReading: yes
+slug: now-you-ve-got-something-to-pie-chart
+tags: 
+ - sentiment analysis
+ - text mining
+ - nlp
+ - nlg
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/v1520543846/randy_blythe_nycweo.jpg
+thumbnailImagePosition: top
+autoThumbnailImage: no
+description:  "Exploring NLP techniques and using Markov Chains to write heavy metal song lyrics. "
+---
+
+# Music, Text Mining, Markov Chains #
+
+This project is a survey of techniques utilized in modern text mining. This includes sentiment analysis, tf-idf (term frequency-inverse document frequency), general methods for exploring and plotting raw text data, and (for something a bit more novel) natural language generation (NLG) using a simple Markov model.
+
+
+## I am a Genius ##
+
+The text that will be used throughout the project are song lyrics of the music group Lamb of God. For a brief background, Lamb of God is a heavy metal band that formed in 1994 under the name Burn the Priest. The group released one album, self titled 'Burn the Priest', and would later change their name to Lamb of God and release an additional seven albums. The list of all albums, in order by release year are:
+
+- Burn the Priest
+
+- New American Gospel
+
+- As the Palaces Burn
+
+- Ashes of the Wake
+
+- Sacrament
+
+- Wrath
+
+- Resolution
+
+- VII: Sturm und Drang
+
+In order to perform the analysis, the album data was scraped from the website https://genius.com using an R package called geniusR. This package is available on github. Below is the full list of packages used in this project, each of which will be explained in more detail when necessary.
+
+
+```{r message = FALSE, warning=FALSE}
+#libraries
+library(tidyverse)
+library(gridExtra)
+library(tidytext)
+library(rebus)
+library(geniusR)
+library(ggraph)
+library(igraph)
+library(patchwork)
+
+```
+
+To utilize the geniusR package, the album names and corresponding artist name must be provided.
+
+```{r}
+
+#Albums of Lamb of God and Burn the Priest
+LoG_names <- c("Burn the Priest","New American Gospel", "As the Palaces Burn", "Ashes of the Wake", 
+               "Sacrament", "Wrath", "Resolution", "VII: Sturm und Drang")
+#List of artist names
+artist_name <- rep("Lamb of God", length(LoG_names) - 1)
+artist_name <- c("Burn the Priest", artist_name)
+
+#create tibble of artist and album names
+albums <- tibble(artist = artist_name, album = LoG_names)
+```
+
+Once the artist names and albums are provided, the following code will retrieve the data from genius.com.
+
+```{r eval = FALSE}
+#retrieve lyrics from genius.com
+album_lyrics <- albums %>% 
+  mutate(tracks = map2(artist, album, genius_album))
+
+
+LOG <- album_lyrics %>% 
+  unnest(tracks)
+
+```
+
+This can take quite a bit of time to run, so I saved a copy as an R dataset. You also might note a line below that removes a duplicated song. As always, you can't take any data at face value and should make it a habit to do sanity checks of any data you did not personally collect. In this case, I noticed the song Black Label was duplicated and incorrectly included on the album Resolution.
+
+```{r echo = FALSE, message = FALSE}
+# Load saved data set
+load(file = "data/LOG.Rda")
+LOG <- newdata %>%
+  #removes unnecessary columns
+  select(-track_url, -title, -track_n, -line) %>%
+  #removes duplicated song
+  filter(album != "Resolution" | title1 != "Black Label") %>%
+  rename(title = title1)
+
+head(LOG,20)
+
+```
+
+Above shows the dataset in its current raw form. We have three variables of interest: album, title, and text. The text variable corresponds to a line of lyrics for the related song and album. We see that one song (title1) spans several lines of text. For example, the song Bloodletting from the album Burn the Priest has 11 lines of text that make up the entire song.
+
+This current form will prove inconvenient for analysis and will need to be processed further. This will be done by splitting each line of text into single word observations, using the unnest_tokens function from the tidytext package.
+
+```{r}
+# Some preprocessing
+
+
+#replace apostrophes from genius into one more readable by R
+apostrophe <- paste(c("'" %R% one_or_more(ALPHA),
+                      "’" %R% one_or_more(ALPHA)),
+                    collapse = "|")
+
+#split text into single word observations
+LOG_clean <- LOG %>%
+  unnest_tokens(lyrics, text) %>%
+  mutate(lyrics = str_replace(lyrics, apostrophe, "")) 
+
+head(LOG_clean,4)
+```
+
+Unpacking what happened above, let's compare with the previous example. The first observation from the raw data was
+
+```{r}
+head(LOG,1)
+```
+
+which is now the first four observations of the clean data. Also note that the tidytext package makes all words lowercase. This is a standard preprocessing technique in text analysis as we want words such as 'the' and 'The' to be treated as the same observation.
+
+It is also standard practice to remove what are referred to as stop words. There is no single agreed upon labeling for stop words, but a common list of them is shown below. The motivation behind what qualifies as a stop word are words that occur with such high frequency they provide little value to conveying useful information or context. It's worth pointing out that context does matter when removing stop words.
+
+```{r}
+#load stop words from tidytext
+SMART_stop_words <- stop_words %>% 
+  filter(lexicon == "SMART")
+
+SMART_stop_words
+```
+
+After removing the stop words below, we note that the overall data reduced from 17246 observations to 7636 observations.
+
+```{r}
+#remove stop words
+LOG_reduced <- LOG_clean %>%
+  anti_join(SMART_stop_words, by = c("lyrics" = "word")) 
+
+LOG_reduced
+```
+
+
+Throughout this project we will make use of the data with and without stop words for comparison. For future reference, the full cleaned dataset will be LOG_clean, and the reduced set will be LOG_reduced.
+
+# Plot Your Damn Data #
+
+Now that the data is in a tidy format we'll explore the word frequencies in a variety of ways.
+
+To begin with, I was very curious what the word frequencies would look like over time. Plotting the raw word frequency of each album (read bottom to top: oldest to newest),
+
+```{r}
+theme_set(theme_bw())
+
+#without stop words
+p1 <- LOG_reduced %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'red') + 
+  coord_flip() + 
+  labs(x = "", y = "") + 
+  theme(legend.position='none')
+#with stop words
+p2 <- LOG_clean %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'purple') + 
+  coord_flip() + 
+  labs( x = "", y = "") + 
+  theme(legend.position='none', axis.text.y = element_blank())
+
+patchwork <- p1 + p2
+patchwork + plot_annotation(
+  title = "Total Word Count of Lamb of God Albums Over Time",
+  caption = "Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  "
+)
+```
+
+it appears that the words counts have generally increased with the release of each new album. Interestingly, this holds true (more or less) with and without stop words. It is difficult to make any formal claims about this trend, but if I had to assign a plausible explanation, I'd point to a group of musicians conintually maturing as song writers. 
+
+We can make similar plots, looking at only distinct word counts. 
+
+```{r}
+p1 <- LOG_reduced %>%
+  group_by(album) %>%
+  summarise(n = n_distinct(lyrics)) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'red') + 
+  coord_flip() + 
+  labs( x = "", y = "") + 
+  theme(legend.position='none')
+
+p2 <- LOG_clean %>%
+  group_by(album) %>%
+  summarise(n = n_distinct(lyrics)) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'purple') + 
+  coord_flip() + 
+  labs( x = "", y = "") + 
+  theme(legend.position='none', axis.text.y = element_blank())
+
+patchwork <- p1 + p2
+patchwork + plot_annotation(
+  title = "Word Count of Unique Words Over Time",
+  caption = "Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  "
+)
+```
+
+Again, this trend generally holds true. So not only did Lamb of God's songs get longer over time, the variety of words used has also increased. Anecdotally, I've been listening to their music for over 10 years and would have never guessed this to be true.
+
+Exploring further, we can answer the question: what words are used most frequently? Here is where we'll see how much of an impact stop words can impact an analysis.
+
+```{r}
+p1 <- LOG_reduced %>%
+  count(lyrics, sort = TRUE) %>%
+  top_n(20, n) %>%
+  ggplot(aes(reorder(lyrics, n), n)) + 
+  geom_bar(stat = "identity", fill = "red") + 
+  coord_flip() + 
+  labs(x = "", y = "") + 
+  theme(legend.position='none')
+
+p2 <- LOG_clean %>%
+  count(lyrics, sort = TRUE) %>%
+  top_n(20, n) %>%
+  ggplot(aes(reorder(lyrics, n), n)) + 
+  geom_bar(stat = "identity", fill = "purple") + 
+  coord_flip() + 
+  labs( x = "", y = "") + 
+  theme(legend.position='none')
+
+patchwork <- p1 + p2
+patchwork + plot_annotation(
+  title = "20 Most Frequent Words",
+  caption = "Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  "
+)
+```
+
+Without the stop words removed, it would be quite difficult to ascertain what themes and context Lamb of God's lyrics may contain. Just comparing the most common word with stop words removed, time, we see it did not even crack the top 20 words when stop words were included! However, with stop words removed the lyrical themes become much more obvious. Overall, the tones and themes of their music is very dark and bleak. If you've ever listened to Lamb of God's music this statement is immediately obvious, but the red plot above does a nice summary for those who are uninitiated with their music.
+
+What if we look at the frequencies of the most common words over time? Here we plot the top five most common words and how their frequencies change with each album.
+
+```{r echo=FALSE}
+p1 <- LOG_reduced %>%
+  filter(lyrics == 'time') %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'red') + 
+  coord_flip() + 
+  labs(title = "Frequency of 'time'", x = "", y = "Lyric Count") + 
+  theme(legend.position='none')
+
+p2 <- LOG_reduced %>%
+  filter(lyrics == 'die') %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'blue') + 
+  coord_flip() + 
+  labs(title = "Frequency of 'die'", x = "", y = "Lyric Count") + 
+  theme(legend.position='none')
+
+p3 <- LOG_reduced %>%
+  filter(lyrics == 'end') %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'yellow') + 
+  coord_flip() + 
+  labs(title = "Frequency of 'end'", x = "", y = "Lyric Count") + 
+  theme(legend.position='none')
+
+p4 <- LOG_reduced %>%
+  filter(lyrics == 'life') %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'green') + 
+  coord_flip() + 
+  labs(title = "Frequency of 'life'", x = "", y = "Lyric Count") + 
+  theme(legend.position='none')
+
+p5 <- LOG_reduced %>%
+  filter(lyrics == 'left') %>%
+  count(album) %>%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = "identity", fill = 'purple') + 
+  coord_flip() + 
+  labs(title = "Frequency of 'left'", x = "", y = "Lyric Count") + 
+  theme(legend.position='none')
+
+patchwork <- (p1 + p2) / (p3 + p4) / (p5 + plot_spacer())
+patchwork
+```
+
+This indicates to me that there is no time dependence of individual word counts. It appears more likely that words used very frequently had an intended purpose for specific albums, as each of these word frequencies seem to spike over a few albums.
+
+Now let's look at the most common words for each album (with stop words removed), which will lead nicely into tf-idf.
+
+```{r}
+#most common words for each album
+LOG_reduced %>%
+  group_by(album, lyrics) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  mutate(row_number = row_number()) %>%
+  filter(row_number <= 5) %>%
+  ggplot(aes(x = drlib::reorder_within(lyrics, n, within = album), y = n, fill = factor(album, levels = LoG_names))) + 
+  geom_bar(stat = "identity") + 
+  drlib::scale_x_reordered() + 
+  coord_flip() + 
+  facet_wrap(~factor(album, levels = LoG_names), scales = "free_y", ncol = 2) + 
+  labs(title = "Top 5 Most Common Words by Album (Stop Words Removed)", x = "Word", y = "Count") + 
+  theme(legend.position='none')
+
+LOG_clean %>%
+  group_by(album, lyrics) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  mutate(row_number = row_number()) %>%
+  filter(row_number <= 5) %>%
+  ggplot(aes(x = drlib::reorder_within(lyrics, n, within = album), y = n, fill = factor(album, levels = LoG_names))) + 
+  geom_bar(stat = "identity") + 
+  drlib::scale_x_reordered() + 
+  coord_flip() + 
+  facet_wrap(~factor(album, levels = LoG_names), scales = "free_y", ncol = 2) + 
+  labs(title = "Top 5 Most Common Words by Album", x = "Word", y = "Count") + 
+  theme(legend.position='none')
+
+```
+
+As we can see, the top five most frequent words for each album has some overlap with the overall most common words, but still shows some variety. This can also be seen as a useful way for heuristically measuring the similarity of the albums. For instance, since 'New American Gospel' and 'As the Palaces Burn' both include life in the most frequent words, we may be inclined there is some weak relationship between them both. As we'll see, this is one use for ti-idf scores.
+
+
+## TF-IDF ##
+
+Term frequency-inverse document frequency scores originate from information retrieval. The idea is to assign a score to a word that reflects the importance of that word to a particular document. One use this provides giving documents relevancy in search engines when a user queries for a specific word.  Documents with a high tf-idf score for queried word would be ranked as most relevant to the search.
+
+Calculating tf-idf scores involves two components, the term frequency portion and the inverse document frequency. Both components have variations of how they should be calculated, so we'll only discuss some simple versions.
+
+Term frequency is very straightforward to calculate, where we'll just use the relatively frequency of a word occurring in a particular document. For example, let $d_1=\{cat, dog,dog\}$ and $d_2 = \{dog, cat,cat\}$. Then the tf scores would be 
+
+$$tf(cat,d1)=\frac{1}{3},$$
+$$tf(cat,d2)=\frac{2}{3},$$
+$$tf(dog,d1)=\frac{2}{3},$$
+$$tf(dog,d1)=\frac{1}{3}.$$
+
+For the most part, the scores are a very reasonable metric, but as we observed earlier, stop words can greatly affect results due to their high frequency but lack of specific information that can be conveyed. This is what brought about the idf portion. The idea is to assign little importance to words that are common both within a document and common among all documents. If you are familiar with Shannon's Entropy, the idf score calculation will appear very familiar. This is no coincidence, as it borrows heavily from Shannon's groundbreaking work. One version of this calculation is as follows: let $D$ be the count of all documents of interest, here $D=2$ from the previous example. Then
+
+$$idf(cat,D) = log(\frac{2}{2})=0,$$
+$$idf(dog,D) = log(\frac{2}{2})=0.$$
+Notice that because dog and cat appear across all our documents, the idf score is 0, giving them little importance for distinguishing the two documents. If instead $d_1 = \{cat,dog,dog,bird\}$,
+
+$$idf(cat,D) = log(\frac{2}{2})=0,$$
+$$idf(dog,D) = log(\frac{2}{2})=0,$$
+$$idf(bird,D) = log(\frac{2}{1})=0.693.$$
+
+Now we observed the idf score of bird is greater than 0, since it only occurs in $d_1$. Finally, to calculate the tf-idf score, we simply take the product of the two components
+
+$$tf(word,d_i)\times idf(word,D).$$
+
+At this point it should be pointed out that the tf-idf score, particularly the idf part, serves nothing more than a useful heuristic. Despite its popularity and over thirty years of research, there is still no theoretical justification for its use. 
+
+Applying the above information to our dataset yields the results below. For convenience, we'll use the bind_tf_idf function from the tidytext package.
+
+
+```{r}
+#calculate tf-idf scores without stop words
+LOG_reduced %>% 
+  count(album, lyrics) %>% 
+  bind_tf_idf(lyrics, album, n) %>% 
+  group_by(album) %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(row_number = row_number()) %>%
+  filter(row_number <= 5) %>%
+  ggplot(aes(drlib::reorder_within(lyrics,
+                            tf_idf,
+                            album),
+         tf_idf,
+         fill = factor(album,
+                       levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = "free_y", ncol = 2) + 
+  labs(title = "TF-IDF of Words in Every Lamb of God Album (Stop Words Removed)",
+       y = "TF-IDF",
+       x = "Word")
+#as above with stop words
+LOG_clean %>% 
+  count(album, lyrics) %>% 
+  bind_tf_idf(lyrics, album, n) %>% 
+  group_by(album) %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(row_number = row_number()) %>%
+  filter(row_number <= 5) %>%
+  ggplot(aes(drlib::reorder_within(lyrics,
+                            tf_idf,
+                            album),
+         tf_idf,
+         fill = factor(album,
+                       levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = "free_y", ncol = 2) + 
+  labs(title = "TF-IDF of Words in Every Lamb of God Album",
+       y = "TF-IDF",
+       x = "Word")
+```
+
+AS previously pointed out, stop words appear to have little impact on the tf-idf score. This displays why tf-idf can be very useful in text mining. For instance, if we relied purely on word frequencies to summarize a document, 'Resolution' would have been characterized by the words the, you, to, I , and a. However, with tf-idf we can uncover a better description, as seen above.
+
+# Getting Sentimental #
+
+Text data can provide a wealth of information to its users, not only conveying topics of interest, but also descriptions of emotion, aka sentiments. There is no single way to measure the emotion from text data, so we shall limit this analysis to two common methods.
+
+First, we shall look at sentiments described as a binary value, positive or negative. These labels come from a human curated list or lexicon. Using the Bing lexicon from the tidytext package, we get the table below.
+
+```{r message=FALSE}
+bing <- sentiments %>% 
+  filter(lexicon == "bing") %>% 
+  select(-score)
+
+LOG_bing <- LOG_reduced %>% 
+  inner_join(bing,
+             by = c("lyrics" = "word"))
+
+LOG_bing %>% 
+  count(lyrics, sentiment, sort = TRUE) %>%
+  top_n(20) %>%
+  knitr::kable()
+```
+
+Unsurprisingly, many of the words frequently used in Lamb of God's lyrics convey a negative sentiment. To get a better idea of just how negative the band's lyrics are, we can look at the proportion of negative words and positive words by album.
+
+```{r}
+LOG_bing %>% 
+  count(album, sentiment) %>% 
+  group_by(album) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ungroup() %>%
+  ggplot(
+    aes(factor(album, levels = LoG_names),
+             prop,
+             fill = factor(sentiment,
+                           levels = c("positive",
+                                      "negative")))) +
+  geom_col(position = "dodge") +
+  labs(title = "Proportion of Positive and Negative Words in Every Album",
+       subtitle = "Based on Bing Liu's Sentiment Lexicon",
+       x = "Album",
+       y = "Proportion of Words",
+       fill = "Sentiment") +
+  coord_flip()
+
+
+```  
+
+Personally, I was not shocked to see the lyrics indicate an overwhelming majority for negativity. That said, to see such consistent ratios of negative to positive is very interesting.
+
+Another approach is to quantify the sentiment of a word. The AFINN lexicon attempts to do this, assigning a rating to words on a scale of -5 to 5, which reads as most negative to most positive.
+
+```{r}
+afinn <- sentiments %>% 
+  filter(lexicon == "AFINN") %>% 
+  select(-sentiment)
+
+LOG_afinn <- LOG_reduced %>% 
+  inner_join(afinn,
+             by = c("lyrics" = "word")) 
+#examples of extremely negative words
+LOG_afinn %>%
+  arrange(score) %>%
+  head() %>%
+  knitr::kable()
+#most positive words
+LOG_afinn %>%
+  arrange(score) %>%
+  tail() %>% 
+  knitr::kable()
+
+```
+
+
+Using this method, we can get an average sentiment for each album.
+
+```{r}
+LOG_afinn %>% 
+  group_by(album) %>% 
+  summarise(mean_score = mean(score,
+                              na.rm = TRUE)) %>%
+  ggplot(aes(factor(album,
+                    levels = LoG_names),
+             -mean_score)) +
+  geom_bar(stat = "identity", fill = "red", alpha = .7) +
+  coord_flip() + 
+  labs(title = "Negative Mean AFINN Scores of Albums",
+       x = "Album",
+       y = "Negative Mean AFINN Score")
+```
+
+Above, we observe that all the albums have an average that is negative, which is indicative of an overall negative sentiment, consistent with the previous results. However, we do observe that unlike the previously plot, there is slightly more variation with the negativity ratings with the AFINN lexicon. 
+
+We can also see the average sentiment for each song.
+```{r}
+LOG_afinn %>% 
+  group_by(album, title) %>%
+  summarise(mean_score = mean(score,
+                              na.rm = TRUE)) %>% 
+  top_n(5, -mean_score) %>% 
+  ungroup() %>%
+  ggplot(aes(drlib::reorder_within(title,
+                            -mean_score,
+                            album),
+             -mean_score,
+             fill = factor(album,
+                           levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = "free_y", ncol = 2) + 
+  labs(title = "Most Negative Songs per Album",
+       x = "Song Title",
+       y = "Mean AFINN Score (Negative)")
+```
+
+Again, the average scores are negative. Interestingly, within each album we observe trends similar to those found using the AFINN and Bing lexicons. Some albums display a flatter, more consistent negativity, while others have more a upward curve displaying larger variation in the overall negativity of each song.
+
+# N-Grams and Word Generation #
+
+Before attempting to generate song lyrics, let's introduce another concept from text mining: N-grams. An N-gram refers to a sequence of n words contained in a document. The idea is that a single word may only contain so much information, and that some dependency between the sequence of words exists. It is typical to analyze 2-grams (bigrams) and 3-grams (trigrams), but the choice of n will depend on the data at hand and the goal of analysis. 
+
+Looking that the song data, let's solidify how the data changes with a bigram model.
+
+```{r message = FALSE}
+#recall original data
+LOG %>%
+  head(1)
+
+#generate bigrams
+LOG_bigrams <- LOG  %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+LOG_bigrams %>% 
+  filter(album == "Burn the Priest") %>%
+  head(3) %>%
+  knitr::kable()
+```
+
+We see that the original line "archaic methods transfer through" when transformed to bigrams becomes "archaic methods", "methods transfer", and "transfer through". Just as with single words, N-gram frequencies can be analyzed in a similar way. This will form the basis of the word generator model, as these frequencies will be used to estimate the conditional probabilities of the next word in a sequence.
+
+```{r}
+
+bigrams_separated <- LOG_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+
+bigram_counts_full <- bigrams_separated %>% 
+  count(word1, word2, sort = TRUE)
+
+bigram_counts_full %>%
+  head(10) %>%
+  knitr::kable()
+```
+
+Above shows some of the most common bigrams from the lyrics. This already reveals the possibility of a dependence on previous words. For instance, 'the' occurs most frequently after 'in'. We can visualize this relationship using a network graph.
+
+
+```{r message = FALSE}
+bigram_graph <- bigram_counts_full %>%
+  filter(n > 5) %>%
+  graph_from_data_frame()
+
+
+
+set.seed(2016)
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+```
+
+The graph above displays the connections of words from Lamb of God's lyrics. The arrows indicate the direction of the relationship, with the darkness of the arrow indicating the strength of this connection. Starting on any node, you can trace the edges of the graph and see how the sequence of words change with each step. It's important to note the graph isn't fully connected, indicative of a property for certain types of Markov chains referred to as an absorbing state (this will be important to account for when writing the text generation model). This graph is what provided the idea behind the text generation model below.
+
+
+For something a bit more novel, I wanted to try and generate random song lyrics with a simple Markov Chain model. The idea is pretty straightforward: for some random sequence of words, $word_0, word_1, ..., word_n$, then the probability of the next word, $word_{n+1}$, will follow the Markov property $P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n)$. In plain english, the probability of the next word only depends on the most recent word generated. We will also generalize this model to incorporate the two previous words, i.e., $P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n, word_{n-1})$.
+
+The algorithm for the one-step Markov model is as follows:
+
+1) Initialize the chain with a random word,
+2) Condition on the current word and
+
+- if all conditional probabilities are 0, repeat step 1
+- else, select the next word at random weighted by the probabilities conditioned on the current word and repeat 2
+
+3) Do the above steps for some random number of iterations.
+
+The if/else of part 2 ensure that if the chain hits an absorbing state that it can continue running the for the specified number of iterations.
+
+To make the number of iterations, and therefore the song lengths random, I wanted to use some restrictions based on the data. Below summarizes the average length of song by album, as well as the summaries for song lengths overall.
+
+```{r}
+#average number of lyrics per song by album
+LOG_clean %>%
+  group_by(album, title) %>%
+  summarise(n = n()) %>%
+  group_by(album) %>%
+  summarise(mean = mean(n)) %>% 
+  knitr::kable()
+
+LOG_clean %>% 
+  group_by(title) %>%
+  summarise(n=n()) %>%
+  filter(n > 1 ) %>%
+  summarise(mean = mean(n), min = min(n), max = max(n), median = median(n)) %>%
+  knitr::kable()
+
+
+```
+
+from these I chose to limit the song lengths between 45 and 300 words.
+
+```{r}
+###Code for 1-step MC model
+
+#randomized song length
+set.seed(1)
+
+one_step_mc <- function() {
+  
+  #create random song length
+  song_length <- sample(45:300, 1)
+  
+  #iniitalize starting word
+  start_word <- sample(bigrams_separated$word1,1)
+  random_lyrics <- list(start_word)
+  random_lyrics_punc <- list(start_word)
+  
+  print("Song length is:")
+  print(song_length)
+  #begin MC
+  for(i in 1:song_length) {
+    #print(random_lyrics)
+    available_words <- bigrams_separated %>% filter(word1 == random_lyrics[[i]]) %>% select(word2)
+    #print(available_words)
+    #if current word is not the start of a bigram, restart markov chain
+    if(nrow(available_words) ==0){
+      
+      random_lyrics[[i+1]] <- sample(bigrams_separated$word1,1)
+      random_lyrics_punc[[i+1]] <- paste(c(". ",random_lyrics[[i+1]]), collapse = "")
+    }
+    else{
+      
+      #select next word weighted by conditional probability
+      random_lyrics[[i+1]] <- sample(available_words$word2,1)
+      random_lyrics_punc[[i+1]] <- random_lyrics[[i+1]]
+    }
+  }
+  
+  #cleaner output for mc generation
+  str_c(as_vector(random_lyrics), collapse = " ")
+  
+}
+
+one_step_mc()
+
+```
+
+Here are a few more samples using the one step model.
+
+```{r echo = FALSE}
+#randomized song length
+set.seed(111)
+one_step_mc()
+```
+
+```{r echo = FALSE}
+#randomized song length
+set.seed(2)
+one_step_mc()
+```
+
+The previous model can be further generalized into a two-step model. Thus, instead of conditioning on the previous word, we will condition on the two previous words. Our Markov model will now have the form: $P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n, word_{n-1})$.
+
+The algorithm for the two-step Markov model is as follows:
+
+1) Initialize the chain with a random word pair,
+2) Condition on the current word pair,
+
+- if all conditional probabilities are 0, repeat step 1
+- else, select the next word at random weighted by the probabilities conditioned on the current word pair and repeat 2
+
+3) Do the above steps for some random number of iterations.
+
+The if/else of part 2 ensure that if the chain hits an absorbing state that it can continue running the for the specified number of iterations.
+
+
+```{r echo=FALSE}
+LOG_trigrams <- LOG  %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3)
+
+trigrams_separated <- LOG_trigrams %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ")
+
+
+```
+
+```{r}
+
+set.seed(1)
+song_length <- sample(45:230, 1)
+
+
+
+#iniitalize starting word
+start_index <- sample(nrow(trigrams_separated),1)
+start_word1 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word1))
+start_word2 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word2))
+random_lyrics <- list(start_word1,start_word2)
+random_lyrics_punc <- random_lyrics
+
+print("Song length is:")
+song_length
+
+i <- 1
+while(i <= song_length) {
+  #print(random_lyrics)
+  available_words <- trigrams_separated %>% filter(word1 == random_lyrics[[i]], word2 == random_lyrics[[i+1]]) %>% select(word3)
+  #print(available_words)
+  #if current word is not the start of a bigram, restart markov chain
+  if(nrow(available_words) ==0){
+    index <- sample(nrow(trigrams_separated),1)
+    new_word1 <- as.character(trigrams_separated %>% slice( index) %>% select(word1))
+    new_word2 <- as.character(trigrams_separated %>% slice( index) %>% select(word2))
+    random_lyrics[[i+2]] <- new_word1
+    random_lyrics[[i+3]] <- new_word2
+    #random_lyrics_punc[[i+2]] <- paste(c(". ",random_lyrics[[i+2]]), collapse = "")
+    random_lyrics_punc[[i+3]] <- random_lyrics[[i+3]]
+    i <- i + 2
+  }
+  else{
+
+    #select next word weighted by conditional probability
+    random_lyrics[[i+2]] <- sample(available_words$word3,1)
+    random_lyrics_punc[[i+2]] <- random_lyrics[[i+2]]
+    i <- i + 1
+  }
+}
+
+as_vector(random_lyrics_punc)
+```
+
+```{r echo = FALSE}
+
+set.seed(341)
+song_length <- sample(45:230, 1)
+
+
+
+#iniitalize starting word
+start_index <- sample(nrow(trigrams_separated),1)
+start_word1 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word1))
+start_word2 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word2))
+random_lyrics <- list(start_word1,start_word2)
+random_lyrics_punc <- random_lyrics
+
+print("Song length is:")
+song_length
+
+i <- 1
+while(i <= song_length) {
+  #print(random_lyrics)
+  available_words <- trigrams_separated %>% filter(word1 == random_lyrics[[i]], word2 == random_lyrics[[i+1]]) %>% select(word3)
+  #print(available_words)
+  #if current word is not the start of a bigram, restart markov chain
+  if(nrow(available_words) ==0){
+    index <- sample(nrow(trigrams_separated),1)
+    new_word1 <- as.character(trigrams_separated %>% slice( index) %>% select(word1))
+    new_word2 <- as.character(trigrams_separated %>% slice( index) %>% select(word2))
+    random_lyrics[[i+2]] <- new_word1
+    random_lyrics[[i+3]] <- new_word2
+    random_lyrics_punc[[i+2]] <- paste(c(". ",random_lyrics[[i+2]]), collapse = "")
+    random_lyrics_punc[[i+3]] <- random_lyrics[[i+3]]
+    i <- i + 2
+  }
+  else{
+
+    #select next word weighted by conditional probability
+    random_lyrics[[i+2]] <- sample(available_words$word3,1)
+    random_lyrics_punc[[i+2]] <- random_lyrics[[i+2]]
+    i <- i + 1
+  }
+}
+
+as_vector(random_lyrics_punc)
+
+```
+
+```{r echo=FALSE}
+
+set.seed(123)
+
+lyrics_generator <- function() {
+song_length <- sample(45:230, 1)
+
+
+
+#iniitalize starting word
+start_index <- sample(nrow(trigrams_separated),1)
+start_word1 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word1))
+start_word2 <- as.character(trigrams_separated %>% slice( start_index) %>% select(word2))
+random_lyrics <- list(start_word1,start_word2)
+random_lyrics_punc <- random_lyrics
+
+print("Song length is:")
+print(song_length)
+
+i <- 1
+while(i <= song_length) {
+  #print(random_lyrics)
+  available_words <- trigrams_separated %>% filter(word1 == random_lyrics[[i]], word2 == random_lyrics[[i+1]]) %>% select(word3)
+  #print(available_words)
+  #if current word is not the start of a bigram, restart markov chain
+  if(nrow(available_words) ==0){
+    index <- sample(nrow(trigrams_separated),1)
+    new_word1 <- as.character(trigrams_separated %>% slice( index) %>% select(word1))
+    new_word2 <- as.character(trigrams_separated %>% slice( index) %>% select(word2))
+    random_lyrics[[i+2]] <- new_word1
+    random_lyrics[[i+3]] <- new_word2
+    random_lyrics_punc[[i+2]] <- paste(c(". ",random_lyrics[[i+2]]), collapse = "")
+    random_lyrics_punc[[i+3]] <- random_lyrics[[i+3]]
+    i <- i + 2
+  }
+  else{
+
+    #select next word weighted by conditional probability
+    random_lyrics[[i+2]] <- sample(available_words$word3,1)
+    random_lyrics_punc[[i+2]] <- random_lyrics[[i+2]]
+    i <- i + 1
+  }
+}
+
+as_vector(random_lyrics_punc)
+}
+```
+
+## Let's Make a Deal ##
+
+<center>
+
+![The famous Monty Hall from Let's Make a Deal](https://res.cloudinary.com/zeucebag/image/upload/v1575992209/monty_hall_mbttva.jpg)
+
+</center>
+
+
+Having generated 6 sets of random lyrics, 3 using a one-step model and 3 using a two-step model, what is the verdict? Without having a formal metric for evaluation, I thought it would be fun to compare actual lyrics with (slightly curated) model generated lyrics and let the user pick which one is real and which is fake. So, are you ready to make a deal?
+
+### Take a Guess ###
+
+**Is 1 Real?**
+<center>
+
+Blind me, dowsing with escalating tension. 
+
+Bury me, under your black wings.
+
+Jacked up, 
+
+and it sure as hell ain't the lucky one son. 
+
+Get one thing straight, 
+
+from the get go I truly don't give a f**k.
+
+Sink or swim, 
+
+and it's all coming down now. 
+
+</center>
+
+**Or is 2 Real?**
+<center>
+
+They finally shoved you in the box
+
+they could never fit you in.
+
+An empty cell forever locked.
+
+So much for best intentions,
+
+but some will load the gun.
+
+And some will hone the knife.
+
+Some will raise the fist,
+
+as they recall your life.
+
+
+</center>
+
+These are supposed the be song lyrics, and yet fall very short of the structure that comes with song lyrics. There is no evident song structure, such as verse-chorus-verse-chorus-bridge-chorus-outre, that would be customary for a song to have. Furthermore, songs tend to have rhyming schemes, which is again absent from the samples generated. This also suggests that our Markov assumption may not be sufficient for the context of generating song lyrics.
+
+# Summary #
+
+We have taken a lengthy trip through the realm of text mining, exploring several techniques for analyzing, visualizing, and generating text, all in the context of analyzing song lyrics. Personally, this project was a tremendous amount of fun, and is was very exciting to learn more about the lyrics of a band I have been following for years, and I hope the reader will feel the same by the end.

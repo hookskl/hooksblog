@@ -1,0 +1,1078 @@
+---
+title: "Now You've Got Something to Pie Chart!!!"
+author: "Kyle Hooks"
+date: '2018-03-08'
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+comments: no
+coverCaption: Randy Blythe being very positive.
+coverImage: //res.cloudinary.com/zeucebag/image/upload/v1520543846/randy_blythe_nycweo.jpg
+coverMeta: out
+coverSize: partial
+categories: 
+ - data analysis
+metaAlignment: center
+clearReading: yes
+slug: now-you-ve-got-something-to-pie-chart
+tags: 
+ - sentiment analysis
+ - text mining
+ - nlp
+ - nlg
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/v1520543846/randy_blythe_nycweo.jpg
+thumbnailImagePosition: top
+autoThumbnailImage: no
+description:  "Exploring NLP techniques and using Markov Chains to write heavy metal song lyrics. "
+---
+
+
+
+<div id="music-text-mining-markov-chains" class="section level1">
+<h1>Music, Text Mining, Markov Chains</h1>
+<p>This project is a survey of techniques utilized in modern text mining. This includes sentiment analysis, tf-idf (term frequency-inverse document frequency), general methods for exploring and plotting raw text data, and (for something a bit more novel) natural language generation (NLG) using a simple Markov model.</p>
+<div id="i-am-a-genius" class="section level2">
+<h2>I am a Genius</h2>
+<p>The text that will be used throughout the project are song lyrics of the music group Lamb of God. For a brief background, Lamb of God is a heavy metal band that formed in 1994 under the name Burn the Priest. The group released one album, self titled ‘Burn the Priest’, and would later change their name to Lamb of God and release an additional seven albums. The list of all albums, in order by release year are:</p>
+<ul>
+<li><p>Burn the Priest</p></li>
+<li><p>New American Gospel</p></li>
+<li><p>As the Palaces Burn</p></li>
+<li><p>Ashes of the Wake</p></li>
+<li><p>Sacrament</p></li>
+<li><p>Wrath</p></li>
+<li><p>Resolution</p></li>
+<li><p>VII: Sturm und Drang</p></li>
+</ul>
+<p>In order to perform the analysis, the album data was scraped from the website <a href="https://genius.com" class="uri">https://genius.com</a> using an R package called geniusR. This package is available on github. Below is the full list of packages used in this project, each of which will be explained in more detail when necessary.</p>
+<pre class="r"><code>#libraries
+library(tidyverse)
+library(gridExtra)
+library(tidytext)
+library(rebus)
+library(geniusR)
+library(ggraph)
+library(igraph)
+library(patchwork)</code></pre>
+<p>To utilize the geniusR package, the album names and corresponding artist name must be provided.</p>
+<pre class="r"><code>#Albums of Lamb of God and Burn the Priest
+LoG_names &lt;- c(&quot;Burn the Priest&quot;,&quot;New American Gospel&quot;, &quot;As the Palaces Burn&quot;, &quot;Ashes of the Wake&quot;, 
+               &quot;Sacrament&quot;, &quot;Wrath&quot;, &quot;Resolution&quot;, &quot;VII: Sturm und Drang&quot;)
+#List of artist names
+artist_name &lt;- rep(&quot;Lamb of God&quot;, length(LoG_names) - 1)
+artist_name &lt;- c(&quot;Burn the Priest&quot;, artist_name)
+
+#create tibble of artist and album names
+albums &lt;- tibble(artist = artist_name, album = LoG_names)</code></pre>
+<p>Once the artist names and albums are provided, the following code will retrieve the data from genius.com.</p>
+<pre class="r"><code>#retrieve lyrics from genius.com
+album_lyrics &lt;- albums %&gt;% 
+  mutate(tracks = map2(artist, album, genius_album))
+
+
+LOG &lt;- album_lyrics %&gt;% 
+  unnest(tracks)</code></pre>
+<p>This can take quite a bit of time to run, so I saved a copy as an R dataset. You also might note a line below that removes a duplicated song. As always, you can’t take any data at face value and should make it a habit to do sanity checks of any data you did not personally collect. In this case, I noticed the song Black Label was duplicated and incorrectly included on the album Resolution.</p>
+<pre><code>## # A tibble: 20 x 3
+##    album          title       text                                              
+##    &lt;chr&gt;          &lt;chr&gt;       &lt;chr&gt;                                             
+##  1 Burn the Prie~ Bloodletti~ Archaic methods transfer through                  
+##  2 Burn the Prie~ Bloodletti~ Well in the face of mass denial                   
+##  3 Burn the Prie~ Bloodletti~ Bitterness fuels the mode                         
+##  4 Burn the Prie~ Bloodletti~ For the escape of mediocrity                      
+##  5 Burn the Prie~ Bloodletti~ Stepping the grate                                
+##  6 Burn the Prie~ Bloodletti~ Shattered nerves ground down                      
+##  7 Burn the Prie~ Bloodletti~ To a glass edge carrying me away                  
+##  8 Burn the Prie~ Bloodletti~ Bloodletting a favorite game of solitaire         
+##  9 Burn the Prie~ Bloodletti~ A suicide mission destined to fail                
+## 10 Burn the Prie~ Bloodletti~ A moving ladder to climb taking me away           
+## 11 Burn the Prie~ Bloodletti~ I wouldn&#39;t have it any other way                  
+## 12 Burn the Prie~ Dimera      With just a flick of the opal banded finger       
+## 13 Burn the Prie~ Dimera      I will throw you into a concentric mental decline 
+## 14 Burn the Prie~ Dimera      I control your elation, I control your depression 
+## 15 Burn the Prie~ Dimera      I take as I wish memory, clothed in a raiment noir
+## 16 Burn the Prie~ Dimera      (I take you under my black wing.)                 
+## 17 Burn the Prie~ Dimera      I take you under my dark wing and nurture         
+## 18 Burn the Prie~ Dimera      You in hate to dwell forever in a Maison Blanche  
+## 19 Burn the Prie~ Dimera      Purity through corruption                         
+## 20 Burn the Prie~ Dimera      Who am I to blame when your basest instincts are ~</code></pre>
+<p>Above shows the dataset in its current raw form. We have three variables of interest: album, title, and text. The text variable corresponds to a line of lyrics for the related song and album. We see that one song (title1) spans several lines of text. For example, the song Bloodletting from the album Burn the Priest has 11 lines of text that make up the entire song.</p>
+<p>This current form will prove inconvenient for analysis and will need to be processed further. This will be done by splitting each line of text into single word observations, using the unnest_tokens function from the tidytext package.</p>
+<pre class="r"><code># Some preprocessing
+
+
+#replace apostrophes from genius into one more readable by R
+apostrophe &lt;- paste(c(&quot;&#39;&quot; %R% one_or_more(ALPHA),
+                      &quot;’&quot; %R% one_or_more(ALPHA)),
+                    collapse = &quot;|&quot;)
+
+#split text into single word observations
+LOG_clean &lt;- LOG %&gt;%
+  unnest_tokens(lyrics, text) %&gt;%
+  mutate(lyrics = str_replace(lyrics, apostrophe, &quot;&quot;)) 
+
+head(LOG_clean,4)</code></pre>
+<pre><code>## # A tibble: 4 x 3
+##   album           title        lyrics  
+##   &lt;chr&gt;           &lt;chr&gt;        &lt;chr&gt;   
+## 1 Burn the Priest Bloodletting archaic 
+## 2 Burn the Priest Bloodletting methods 
+## 3 Burn the Priest Bloodletting transfer
+## 4 Burn the Priest Bloodletting through</code></pre>
+<p>Unpacking what happened above, let’s compare with the previous example. The first observation from the raw data was</p>
+<pre class="r"><code>head(LOG,1)</code></pre>
+<pre><code>## # A tibble: 1 x 3
+##   album           title        text                            
+##   &lt;chr&gt;           &lt;chr&gt;        &lt;chr&gt;                           
+## 1 Burn the Priest Bloodletting Archaic methods transfer through</code></pre>
+<p>which is now the first four observations of the clean data. Also note that the tidytext package makes all words lowercase. This is a standard preprocessing technique in text analysis as we want words such as ‘the’ and ‘The’ to be treated as the same observation.</p>
+<p>It is also standard practice to remove what are referred to as stop words. There is no single agreed upon labeling for stop words, but a common list of them is shown below. The motivation behind what qualifies as a stop word are words that occur with such high frequency they provide little value to conveying useful information or context. It’s worth pointing out that context does matter when removing stop words.</p>
+<pre class="r"><code>#load stop words from tidytext
+SMART_stop_words &lt;- stop_words %&gt;% 
+  filter(lexicon == &quot;SMART&quot;)
+
+SMART_stop_words</code></pre>
+<pre><code>## # A tibble: 571 x 2
+##    word        lexicon
+##    &lt;chr&gt;       &lt;chr&gt;  
+##  1 a           SMART  
+##  2 a&#39;s         SMART  
+##  3 able        SMART  
+##  4 about       SMART  
+##  5 above       SMART  
+##  6 according   SMART  
+##  7 accordingly SMART  
+##  8 across      SMART  
+##  9 actually    SMART  
+## 10 after       SMART  
+## # ... with 561 more rows</code></pre>
+<p>After removing the stop words below, we note that the overall data reduced from 17246 observations to 7636 observations.</p>
+<pre class="r"><code>#remove stop words
+LOG_reduced &lt;- LOG_clean %&gt;%
+  anti_join(SMART_stop_words, by = c(&quot;lyrics&quot; = &quot;word&quot;)) 
+
+LOG_reduced</code></pre>
+<pre><code>## # A tibble: 7,636 x 3
+##    album           title        lyrics    
+##    &lt;chr&gt;           &lt;chr&gt;        &lt;chr&gt;     
+##  1 Burn the Priest Bloodletting archaic   
+##  2 Burn the Priest Bloodletting methods   
+##  3 Burn the Priest Bloodletting transfer  
+##  4 Burn the Priest Bloodletting face      
+##  5 Burn the Priest Bloodletting mass      
+##  6 Burn the Priest Bloodletting denial    
+##  7 Burn the Priest Bloodletting bitterness
+##  8 Burn the Priest Bloodletting fuels     
+##  9 Burn the Priest Bloodletting mode      
+## 10 Burn the Priest Bloodletting escape    
+## # ... with 7,626 more rows</code></pre>
+<p>Throughout this project we will make use of the data with and without stop words for comparison. For future reference, the full cleaned dataset will be LOG_clean, and the reduced set will be LOG_reduced.</p>
+</div>
+</div>
+<div id="plot-your-damn-data" class="section level1">
+<h1>Plot Your Damn Data</h1>
+<p>Now that the data is in a tidy format we’ll explore the word frequencies in a variety of ways.</p>
+<p>To begin with, I was very curious what the word frequencies would look like over time. Plotting the raw word frequency of each album (read bottom to top: oldest to newest),</p>
+<pre class="r"><code>theme_set(theme_bw())
+
+#without stop words
+p1 &lt;- LOG_reduced %&gt;%
+  count(album) %&gt;%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &#39;red&#39;) + 
+  coord_flip() + 
+  labs(x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;)
+#with stop words
+p2 &lt;- LOG_clean %&gt;%
+  count(album) %&gt;%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &#39;purple&#39;) + 
+  coord_flip() + 
+  labs( x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;, axis.text.y = element_blank())
+
+patchwork &lt;- p1 + p2
+patchwork + plot_annotation(
+  title = &quot;Total Word Count of Lamb of God Albums Over Time&quot;,
+  caption = &quot;Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  &quot;
+)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>it appears that the words counts have generally increased with the release of each new album. Interestingly, this holds true (more or less) with and without stop words. It is difficult to make any formal claims about this trend, but if I had to assign a plausible explanation, I’d point to a group of musicians conintually maturing as song writers.</p>
+<p>We can make similar plots, looking at only distinct word counts.</p>
+<pre class="r"><code>p1 &lt;- LOG_reduced %&gt;%
+  group_by(album) %&gt;%
+  summarise(n = n_distinct(lyrics)) %&gt;%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &#39;red&#39;) + 
+  coord_flip() + 
+  labs( x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;)
+
+p2 &lt;- LOG_clean %&gt;%
+  group_by(album) %&gt;%
+  summarise(n = n_distinct(lyrics)) %&gt;%
+  ggplot(aes(x = factor(album, levels = LoG_names), y = n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &#39;purple&#39;) + 
+  coord_flip() + 
+  labs( x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;, axis.text.y = element_blank())
+
+patchwork &lt;- p1 + p2
+patchwork + plot_annotation(
+  title = &quot;Word Count of Unique Words Over Time&quot;,
+  caption = &quot;Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  &quot;
+)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Again, this trend generally holds true. So not only did Lamb of God’s songs get longer over time, the variety of words used has also increased. Anecdotally, I’ve been listening to their music for over 10 years and would have never guessed this to be true.</p>
+<p>Exploring further, we can answer the question: what words are used most frequently? Here is where we’ll see how much of an impact stop words can impact an analysis.</p>
+<pre class="r"><code>p1 &lt;- LOG_reduced %&gt;%
+  count(lyrics, sort = TRUE) %&gt;%
+  top_n(20, n) %&gt;%
+  ggplot(aes(reorder(lyrics, n), n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &quot;red&quot;) + 
+  coord_flip() + 
+  labs(x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;)
+
+p2 &lt;- LOG_clean %&gt;%
+  count(lyrics, sort = TRUE) %&gt;%
+  top_n(20, n) %&gt;%
+  ggplot(aes(reorder(lyrics, n), n)) + 
+  geom_bar(stat = &quot;identity&quot;, fill = &quot;purple&quot;) + 
+  coord_flip() + 
+  labs( x = &quot;&quot;, y = &quot;&quot;) + 
+  theme(legend.position=&#39;none&#39;)
+
+patchwork &lt;- p1 + p2
+patchwork + plot_annotation(
+  title = &quot;20 Most Frequent Words&quot;,
+  caption = &quot;Left: Word Count w/Stop Words Removed. \nRight: Raw Word Count.\t  &quot;
+)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>Without the stop words removed, it would be quite difficult to ascertain what themes and context Lamb of God’s lyrics may contain. Just comparing the most common word with stop words removed, time, we see it did not even crack the top 20 words when stop words were included! However, with stop words removed the lyrical themes become much more obvious. Overall, the tones and themes of their music is very dark and bleak. If you’ve ever listened to Lamb of God’s music this statement is immediately obvious, but the red plot above does a nice summary for those who are uninitiated with their music.</p>
+<p>What if we look at the frequencies of the most common words over time? Here we plot the top five most common words and how their frequencies change with each album.</p>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>This indicates to me that there is no time dependence of individual word counts. It appears more likely that words used very frequently had an intended purpose for specific albums, as each of these word frequencies seem to spike over a few albums.</p>
+<p>Now let’s look at the most common words for each album (with stop words removed), which will lead nicely into tf-idf.</p>
+<pre class="r"><code>#most common words for each album
+LOG_reduced %&gt;%
+  group_by(album, lyrics) %&gt;%
+  summarise(n = n()) %&gt;%
+  arrange(desc(n)) %&gt;%
+  mutate(row_number = row_number()) %&gt;%
+  filter(row_number &lt;= 5) %&gt;%
+  ggplot(aes(x = drlib::reorder_within(lyrics, n, within = album), y = n, fill = factor(album, levels = LoG_names))) + 
+  geom_bar(stat = &quot;identity&quot;) + 
+  drlib::scale_x_reordered() + 
+  coord_flip() + 
+  facet_wrap(~factor(album, levels = LoG_names), scales = &quot;free_y&quot;, ncol = 2) + 
+  labs(title = &quot;Top 5 Most Common Words by Album (Stop Words Removed)&quot;, x = &quot;Word&quot;, y = &quot;Count&quot;) + 
+  theme(legend.position=&#39;none&#39;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<pre class="r"><code>LOG_clean %&gt;%
+  group_by(album, lyrics) %&gt;%
+  summarise(n = n()) %&gt;%
+  arrange(desc(n)) %&gt;%
+  mutate(row_number = row_number()) %&gt;%
+  filter(row_number &lt;= 5) %&gt;%
+  ggplot(aes(x = drlib::reorder_within(lyrics, n, within = album), y = n, fill = factor(album, levels = LoG_names))) + 
+  geom_bar(stat = &quot;identity&quot;) + 
+  drlib::scale_x_reordered() + 
+  coord_flip() + 
+  facet_wrap(~factor(album, levels = LoG_names), scales = &quot;free_y&quot;, ncol = 2) + 
+  labs(title = &quot;Top 5 Most Common Words by Album&quot;, x = &quot;Word&quot;, y = &quot;Count&quot;) + 
+  theme(legend.position=&#39;none&#39;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-13-2.png" width="672" /></p>
+<p>As we can see, the top five most frequent words for each album has some overlap with the overall most common words, but still shows some variety. This can also be seen as a useful way for heuristically measuring the similarity of the albums. For instance, since ‘New American Gospel’ and ‘As the Palaces Burn’ both include life in the most frequent words, we may be inclined there is some weak relationship between them both. As we’ll see, this is one use for ti-idf scores.</p>
+<div id="tf-idf" class="section level2">
+<h2>TF-IDF</h2>
+<p>Term frequency-inverse document frequency scores originate from information retrieval. The idea is to assign a score to a word that reflects the importance of that word to a particular document. One use this provides giving documents relevancy in search engines when a user queries for a specific word. Documents with a high tf-idf score for queried word would be ranked as most relevant to the search.</p>
+<p>Calculating tf-idf scores involves two components, the term frequency portion and the inverse document frequency. Both components have variations of how they should be calculated, so we’ll only discuss some simple versions.</p>
+<p>Term frequency is very straightforward to calculate, where we’ll just use the relatively frequency of a word occurring in a particular document. For example, let <span class="math inline">\(d_1=\{cat, dog,dog\}\)</span> and <span class="math inline">\(d_2 = \{dog, cat,cat\}\)</span>. Then the tf scores would be</p>
+<p><span class="math display">\[tf(cat,d1)=\frac{1}{3},\]</span>
+<span class="math display">\[tf(cat,d2)=\frac{2}{3},\]</span>
+<span class="math display">\[tf(dog,d1)=\frac{2}{3},\]</span>
+<span class="math display">\[tf(dog,d1)=\frac{1}{3}.\]</span></p>
+<p>For the most part, the scores are a very reasonable metric, but as we observed earlier, stop words can greatly affect results due to their high frequency but lack of specific information that can be conveyed. This is what brought about the idf portion. The idea is to assign little importance to words that are common both within a document and common among all documents. If you are familiar with Shannon’s Entropy, the idf score calculation will appear very familiar. This is no coincidence, as it borrows heavily from Shannon’s groundbreaking work. One version of this calculation is as follows: let <span class="math inline">\(D\)</span> be the count of all documents of interest, here <span class="math inline">\(D=2\)</span> from the previous example. Then</p>
+<p><span class="math display">\[idf(cat,D) = log(\frac{2}{2})=0,\]</span>
+<span class="math display">\[idf(dog,D) = log(\frac{2}{2})=0.\]</span>
+Notice that because dog and cat appear across all our documents, the idf score is 0, giving them little importance for distinguishing the two documents. If instead <span class="math inline">\(d_1 = \{cat,dog,dog,bird\}\)</span>,</p>
+<p><span class="math display">\[idf(cat,D) = log(\frac{2}{2})=0,\]</span>
+<span class="math display">\[idf(dog,D) = log(\frac{2}{2})=0,\]</span>
+<span class="math display">\[idf(bird,D) = log(\frac{2}{1})=0.693.\]</span></p>
+<p>Now we observed the idf score of bird is greater than 0, since it only occurs in <span class="math inline">\(d_1\)</span>. Finally, to calculate the tf-idf score, we simply take the product of the two components</p>
+<p><span class="math display">\[tf(word,d_i)\times idf(word,D).\]</span></p>
+<p>At this point it should be pointed out that the tf-idf score, particularly the idf part, serves nothing more than a useful heuristic. Despite its popularity and over thirty years of research, there is still no theoretical justification for its use.</p>
+<p>Applying the above information to our dataset yields the results below. For convenience, we’ll use the bind_tf_idf function from the tidytext package.</p>
+<pre class="r"><code>#calculate tf-idf scores without stop words
+LOG_reduced %&gt;% 
+  count(album, lyrics) %&gt;% 
+  bind_tf_idf(lyrics, album, n) %&gt;% 
+  group_by(album) %&gt;%
+  arrange(desc(tf_idf)) %&gt;%
+  mutate(row_number = row_number()) %&gt;%
+  filter(row_number &lt;= 5) %&gt;%
+  ggplot(aes(drlib::reorder_within(lyrics,
+                            tf_idf,
+                            album),
+         tf_idf,
+         fill = factor(album,
+                       levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = &quot;free_y&quot;, ncol = 2) + 
+  labs(title = &quot;TF-IDF of Words in Every Lamb of God Album (Stop Words Removed)&quot;,
+       y = &quot;TF-IDF&quot;,
+       x = &quot;Word&quot;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<pre class="r"><code>#as above with stop words
+LOG_clean %&gt;% 
+  count(album, lyrics) %&gt;% 
+  bind_tf_idf(lyrics, album, n) %&gt;% 
+  group_by(album) %&gt;%
+  arrange(desc(tf_idf)) %&gt;%
+  mutate(row_number = row_number()) %&gt;%
+  filter(row_number &lt;= 5) %&gt;%
+  ggplot(aes(drlib::reorder_within(lyrics,
+                            tf_idf,
+                            album),
+         tf_idf,
+         fill = factor(album,
+                       levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = &quot;free_y&quot;, ncol = 2) + 
+  labs(title = &quot;TF-IDF of Words in Every Lamb of God Album&quot;,
+       y = &quot;TF-IDF&quot;,
+       x = &quot;Word&quot;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-14-2.png" width="672" /></p>
+<p>AS previously pointed out, stop words appear to have little impact on the tf-idf score. This displays why tf-idf can be very useful in text mining. For instance, if we relied purely on word frequencies to summarize a document, ‘Resolution’ would have been characterized by the words the, you, to, I , and a. However, with tf-idf we can uncover a better description, as seen above.</p>
+</div>
+</div>
+<div id="getting-sentimental" class="section level1">
+<h1>Getting Sentimental</h1>
+<p>Text data can provide a wealth of information to its users, not only conveying topics of interest, but also descriptions of emotion, aka sentiments. There is no single way to measure the emotion from text data, so we shall limit this analysis to two common methods.</p>
+<p>First, we shall look at sentiments described as a binary value, positive or negative. These labels come from a human curated list or lexicon. Using the Bing lexicon from the tidytext package, we get the table below.</p>
+<pre class="r"><code>bing &lt;- sentiments %&gt;% 
+  filter(lexicon == &quot;bing&quot;) %&gt;% 
+  select(-score)
+
+LOG_bing &lt;- LOG_reduced %&gt;% 
+  inner_join(bing,
+             by = c(&quot;lyrics&quot; = &quot;word&quot;))
+
+LOG_bing %&gt;% 
+  count(lyrics, sentiment, sort = TRUE) %&gt;%
+  top_n(20) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">lyrics</th>
+<th align="left">sentiment</th>
+<th align="right">n</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">die</td>
+<td align="left">negative</td>
+<td align="right">51</td>
+</tr>
+<tr class="even">
+<td align="left">fuck</td>
+<td align="left">negative</td>
+<td align="right">32</td>
+</tr>
+<tr class="odd">
+<td align="left">burn</td>
+<td align="left">negative</td>
+<td align="right">31</td>
+</tr>
+<tr class="even">
+<td align="left">fucking</td>
+<td align="left">negative</td>
+<td align="right">31</td>
+</tr>
+<tr class="odd">
+<td align="left">lies</td>
+<td align="left">negative</td>
+<td align="right">31</td>
+</tr>
+<tr class="even">
+<td align="left">lost</td>
+<td align="left">negative</td>
+<td align="right">31</td>
+</tr>
+<tr class="odd">
+<td align="left">broken</td>
+<td align="left">negative</td>
+<td align="right">30</td>
+</tr>
+<tr class="even">
+<td align="left">hate</td>
+<td align="left">negative</td>
+<td align="right">29</td>
+</tr>
+<tr class="odd">
+<td align="left">lie</td>
+<td align="left">negative</td>
+<td align="right">29</td>
+</tr>
+<tr class="even">
+<td align="left">dead</td>
+<td align="left">negative</td>
+<td align="right">27</td>
+</tr>
+<tr class="odd">
+<td align="left">death</td>
+<td align="left">negative</td>
+<td align="right">26</td>
+</tr>
+<tr class="even">
+<td align="left">pain</td>
+<td align="left">negative</td>
+<td align="right">23</td>
+</tr>
+<tr class="odd">
+<td align="left">hell</td>
+<td align="left">negative</td>
+<td align="right">22</td>
+</tr>
+<tr class="even">
+<td align="left">kill</td>
+<td align="left">negative</td>
+<td align="right">19</td>
+</tr>
+<tr class="odd">
+<td align="left">won</td>
+<td align="left">positive</td>
+<td align="right">19</td>
+</tr>
+<tr class="even">
+<td align="left">falling</td>
+<td align="left">negative</td>
+<td align="right">18</td>
+</tr>
+<tr class="odd">
+<td align="left">killing</td>
+<td align="left">negative</td>
+<td align="right">18</td>
+</tr>
+<tr class="even">
+<td align="left">fall</td>
+<td align="left">negative</td>
+<td align="right">15</td>
+</tr>
+<tr class="odd">
+<td align="left">weak</td>
+<td align="left">negative</td>
+<td align="right">15</td>
+</tr>
+<tr class="even">
+<td align="left">dying</td>
+<td align="left">negative</td>
+<td align="right">14</td>
+</tr>
+</tbody>
+</table>
+<p>Unsurprisingly, many of the words frequently used in Lamb of God’s lyrics convey a negative sentiment. To get a better idea of just how negative the band’s lyrics are, we can look at the proportion of negative words and positive words by album.</p>
+<pre class="r"><code>LOG_bing %&gt;% 
+  count(album, sentiment) %&gt;% 
+  group_by(album) %&gt;% 
+  mutate(prop = n / sum(n)) %&gt;% 
+  ungroup() %&gt;%
+  ggplot(
+    aes(factor(album, levels = LoG_names),
+             prop,
+             fill = factor(sentiment,
+                           levels = c(&quot;positive&quot;,
+                                      &quot;negative&quot;)))) +
+  geom_col(position = &quot;dodge&quot;) +
+  labs(title = &quot;Proportion of Positive and Negative Words in Every Album&quot;,
+       subtitle = &quot;Based on Bing Liu&#39;s Sentiment Lexicon&quot;,
+       x = &quot;Album&quot;,
+       y = &quot;Proportion of Words&quot;,
+       fill = &quot;Sentiment&quot;) +
+  coord_flip()</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>Personally, I was not shocked to see the lyrics indicate an overwhelming majority for negativity. That said, to see such consistent ratios of negative to positive is very interesting.</p>
+<p>Another approach is to quantify the sentiment of a word. The AFINN lexicon attempts to do this, assigning a rating to words on a scale of -5 to 5, which reads as most negative to most positive.</p>
+<pre class="r"><code>afinn &lt;- sentiments %&gt;% 
+  filter(lexicon == &quot;AFINN&quot;) %&gt;% 
+  select(-sentiment)
+
+LOG_afinn &lt;- LOG_reduced %&gt;% 
+  inner_join(afinn,
+             by = c(&quot;lyrics&quot; = &quot;word&quot;)) 
+#examples of extremely negative words
+LOG_afinn %&gt;%
+  arrange(score) %&gt;%
+  head() %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">album</th>
+<th align="center">title</th>
+<th align="left">lyrics</th>
+<th align="left">lexicon</th>
+<th align="right">score</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Burn the Priest</td>
+<td align="center">Goatfish</td>
+<td align="left">motherfucker</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+<tr class="even">
+<td align="left">New American Gospel</td>
+<td align="center">O.D.H.G.A.B.F.E.</td>
+<td align="left">bitch</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+<tr class="odd">
+<td align="left">New American Gospel</td>
+<td align="center">Nippon</td>
+<td align="left">cock</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+<tr class="even">
+<td align="left">As the Palaces Burn</td>
+<td align="center">Boot Scraper</td>
+<td align="left">bitch</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+<tr class="odd">
+<td align="left">As the Palaces Burn</td>
+<td align="center">Boot Scraper</td>
+<td align="left">motherfucker</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+<tr class="even">
+<td align="left">As the Palaces Burn</td>
+<td align="center">A Devil In God’s Country</td>
+<td align="left">bitch</td>
+<td align="left">AFINN</td>
+<td align="right">-5</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>#most positive words
+LOG_afinn %&gt;%
+  arrange(score) %&gt;%
+  tail() %&gt;% 
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">album</th>
+<th align="center">title</th>
+<th align="left">lyrics</th>
+<th align="left">lexicon</th>
+<th align="right">score</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">As the Palaces Burn</td>
+<td align="center">As the Palaces Burn</td>
+<td align="left">rejoice</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+<tr class="even">
+<td align="left">Ashes of the Wake</td>
+<td align="center">What I’ve Become</td>
+<td align="left">amazing</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+<tr class="odd">
+<td align="left">Ashes of the Wake</td>
+<td align="center">What I’ve Become</td>
+<td align="left">masterpiece</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+<tr class="even">
+<td align="left">Ashes of the Wake</td>
+<td align="center">What I’ve Become</td>
+<td align="left">masterpiece</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+<tr class="odd">
+<td align="left">Wrath</td>
+<td align="center">Dead Seeds</td>
+<td align="left">rejoice</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+<tr class="even">
+<td align="left">Resolution</td>
+<td align="center">Ghost Walking</td>
+<td align="left">heavenly</td>
+<td align="left">AFINN</td>
+<td align="right">4</td>
+</tr>
+</tbody>
+</table>
+<p>Using this method, we can get an average sentiment for each album.</p>
+<pre class="r"><code>LOG_afinn %&gt;% 
+  group_by(album) %&gt;% 
+  summarise(mean_score = mean(score,
+                              na.rm = TRUE)) %&gt;%
+  ggplot(aes(factor(album,
+                    levels = LoG_names),
+             -mean_score)) +
+  geom_bar(stat = &quot;identity&quot;, fill = &quot;red&quot;, alpha = .7) +
+  coord_flip() + 
+  labs(title = &quot;Negative Mean AFINN Scores of Albums&quot;,
+       x = &quot;Album&quot;,
+       y = &quot;Negative Mean AFINN Score&quot;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>Above, we observe that all the albums have an average that is negative, which is indicative of an overall negative sentiment, consistent with the previous results. However, we do observe that unlike the previously plot, there is slightly more variation with the negativity ratings with the AFINN lexicon.</p>
+<p>We can also see the average sentiment for each song.</p>
+<pre class="r"><code>LOG_afinn %&gt;% 
+  group_by(album, title) %&gt;%
+  summarise(mean_score = mean(score,
+                              na.rm = TRUE)) %&gt;% 
+  top_n(5, -mean_score) %&gt;% 
+  ungroup() %&gt;%
+  ggplot(aes(drlib::reorder_within(title,
+                            -mean_score,
+                            album),
+             -mean_score,
+             fill = factor(album,
+                           levels = LoG_names))) +
+  drlib::scale_x_reordered() +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~factor(album, levels = LoG_names), scales = &quot;free_y&quot;, ncol = 2) + 
+  labs(title = &quot;Most Negative Songs per Album&quot;,
+       x = &quot;Song Title&quot;,
+       y = &quot;Mean AFINN Score (Negative)&quot;)</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p>Again, the average scores are negative. Interestingly, within each album we observe trends similar to those found using the AFINN and Bing lexicons. Some albums display a flatter, more consistent negativity, while others have more a upward curve displaying larger variation in the overall negativity of each song.</p>
+</div>
+<div id="n-grams-and-word-generation" class="section level1">
+<h1>N-Grams and Word Generation</h1>
+<p>Before attempting to generate song lyrics, let’s introduce another concept from text mining: N-grams. An N-gram refers to a sequence of n words contained in a document. The idea is that a single word may only contain so much information, and that some dependency between the sequence of words exists. It is typical to analyze 2-grams (bigrams) and 3-grams (trigrams), but the choice of n will depend on the data at hand and the goal of analysis.</p>
+<p>Looking that the song data, let’s solidify how the data changes with a bigram model.</p>
+<pre class="r"><code>#recall original data
+LOG %&gt;%
+  head(1)</code></pre>
+<pre><code>## # A tibble: 1 x 3
+##   album           title        text                            
+##   &lt;chr&gt;           &lt;chr&gt;        &lt;chr&gt;                           
+## 1 Burn the Priest Bloodletting Archaic methods transfer through</code></pre>
+<pre class="r"><code>#generate bigrams
+LOG_bigrams &lt;- LOG  %&gt;%
+  unnest_tokens(bigram, text, token = &quot;ngrams&quot;, n = 2)
+
+LOG_bigrams %&gt;% 
+  filter(album == &quot;Burn the Priest&quot;) %&gt;%
+  head(3) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">album</th>
+<th align="center">title</th>
+<th align="left">bigram</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Burn the Priest</td>
+<td align="center">Bloodletting</td>
+<td align="left">archaic methods</td>
+</tr>
+<tr class="even">
+<td align="left">Burn the Priest</td>
+<td align="center">Bloodletting</td>
+<td align="left">methods transfer</td>
+</tr>
+<tr class="odd">
+<td align="left">Burn the Priest</td>
+<td align="center">Bloodletting</td>
+<td align="left">transfer through</td>
+</tr>
+</tbody>
+</table>
+<p>We see that the original line “archaic methods transfer through” when transformed to bigrams becomes “archaic methods”, “methods transfer”, and “transfer through”. Just as with single words, N-gram frequencies can be analyzed in a similar way. This will form the basis of the word generator model, as these frequencies will be used to estimate the conditional probabilities of the next word in a sequence.</p>
+<pre class="r"><code>bigrams_separated &lt;- LOG_bigrams %&gt;%
+  separate(bigram, c(&quot;word1&quot;, &quot;word2&quot;), sep = &quot; &quot;)
+
+
+bigram_counts_full &lt;- bigrams_separated %&gt;% 
+  count(word1, word2, sort = TRUE)
+
+bigram_counts_full %&gt;%
+  head(10) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">word1</th>
+<th align="left">word2</th>
+<th align="right">n</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">in</td>
+<td align="left">the</td>
+<td align="right">86</td>
+</tr>
+<tr class="even">
+<td align="left">of</td>
+<td align="left">the</td>
+<td align="right">66</td>
+</tr>
+<tr class="odd">
+<td align="left">i</td>
+<td align="left">am</td>
+<td align="right">44</td>
+</tr>
+<tr class="even">
+<td align="left">for</td>
+<td align="left">the</td>
+<td align="right">42</td>
+</tr>
+<tr class="odd">
+<td align="left">this</td>
+<td align="left">is</td>
+<td align="right">38</td>
+</tr>
+<tr class="even">
+<td align="left">to</td>
+<td align="left">the</td>
+<td align="right">33</td>
+</tr>
+<tr class="odd">
+<td align="left">on</td>
+<td align="left">the</td>
+<td align="right">32</td>
+</tr>
+<tr class="even">
+<td align="left">in</td>
+<td align="left">a</td>
+<td align="right">28</td>
+</tr>
+<tr class="odd">
+<td align="left">your</td>
+<td align="left">own</td>
+<td align="right">27</td>
+</tr>
+<tr class="even">
+<td align="left">in</td>
+<td align="left">your</td>
+<td align="right">26</td>
+</tr>
+</tbody>
+</table>
+<p>Above shows some of the most common bigrams from the lyrics. This already reveals the possibility of a dependence on previous words. For instance, ‘the’ occurs most frequently after ‘in’. We can visualize this relationship using a network graph.</p>
+<pre class="r"><code>bigram_graph &lt;- bigram_counts_full %&gt;%
+  filter(n &gt; 5) %&gt;%
+  graph_from_data_frame()
+
+
+
+set.seed(2016)
+
+a &lt;- grid::arrow(type = &quot;closed&quot;, length = unit(.15, &quot;inches&quot;))
+
+ggraph(bigram_graph, layout = &quot;fr&quot;) +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, &#39;inches&#39;)) +
+  geom_node_point(color = &quot;lightblue&quot;, size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()</code></pre>
+<p><img src="/post/2018-03-08-now-you-ve-got-something-to-pie-chart_files/figure-html/unnamed-chunk-22-1.png" width="672" /></p>
+<p>The graph above displays the connections of words from Lamb of God’s lyrics. The arrows indicate the direction of the relationship, with the darkness of the arrow indicating the strength of this connection. Starting on any node, you can trace the edges of the graph and see how the sequence of words change with each step. It’s important to note the graph isn’t fully connected, indicative of a property for certain types of Markov chains referred to as an absorbing state (this will be important to account for when writing the text generation model). This graph is what provided the idea behind the text generation model below.</p>
+<p>For something a bit more novel, I wanted to try and generate random song lyrics with a simple Markov Chain model. The idea is pretty straightforward: for some random sequence of words, <span class="math inline">\(word_0, word_1, ..., word_n\)</span>, then the probability of the next word, <span class="math inline">\(word_{n+1}\)</span>, will follow the Markov property <span class="math inline">\(P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n)\)</span>. In plain english, the probability of the next word only depends on the most recent word generated. We will also generalize this model to incorporate the two previous words, i.e., <span class="math inline">\(P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n, word_{n-1})\)</span>.</p>
+<p>The algorithm for the one-step Markov model is as follows:</p>
+<ol style="list-style-type: decimal">
+<li>Initialize the chain with a random word,</li>
+<li>Condition on the current word and</li>
+</ol>
+<ul>
+<li>if all conditional probabilities are 0, repeat step 1</li>
+<li>else, select the next word at random weighted by the probabilities conditioned on the current word and repeat 2</li>
+</ul>
+<ol start="3" style="list-style-type: decimal">
+<li>Do the above steps for some random number of iterations.</li>
+</ol>
+<p>The if/else of part 2 ensure that if the chain hits an absorbing state that it can continue running the for the specified number of iterations.</p>
+<p>To make the number of iterations, and therefore the song lengths random, I wanted to use some restrictions based on the data. Below summarizes the average length of song by album, as well as the summaries for song lengths overall.</p>
+<pre class="r"><code>#average number of lyrics per song by album
+LOG_clean %&gt;%
+  group_by(album, title) %&gt;%
+  summarise(n = n()) %&gt;%
+  group_by(album) %&gt;%
+  summarise(mean = mean(n)) %&gt;% 
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">album</th>
+<th align="right">mean</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">As the Palaces Burn</td>
+<td align="right">181.40000</td>
+</tr>
+<tr class="even">
+<td align="left">Ashes of the Wake</td>
+<td align="right">176.66667</td>
+</tr>
+<tr class="odd">
+<td align="left">Burn the Priest</td>
+<td align="right">79.35714</td>
+</tr>
+<tr class="even">
+<td align="left">New American Gospel</td>
+<td align="right">121.81818</td>
+</tr>
+<tr class="odd">
+<td align="left">Resolution</td>
+<td align="right">199.00000</td>
+</tr>
+<tr class="even">
+<td align="left">Sacrament</td>
+<td align="right">210.00000</td>
+</tr>
+<tr class="odd">
+<td align="left">VII: Sturm und Drang</td>
+<td align="right">243.91667</td>
+</tr>
+<tr class="even">
+<td align="left">Wrath</td>
+<td align="right">201.53846</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>LOG_clean %&gt;% 
+  group_by(title) %&gt;%
+  summarise(n=n()) %&gt;%
+  filter(n &gt; 1 ) %&gt;%
+  summarise(mean = mean(n), min = min(n), max = max(n), median = median(n)) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">mean</th>
+<th align="right">min</th>
+<th align="right">max</th>
+<th align="right">median</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">177.8061</td>
+<td align="right">34</td>
+<td align="right">325</td>
+<td align="right">180</td>
+</tr>
+</tbody>
+</table>
+<p>from these I chose to limit the song lengths between 45 and 300 words.</p>
+<pre class="r"><code>###Code for 1-step MC model
+
+#randomized song length
+set.seed(1)
+
+one_step_mc &lt;- function() {
+  
+  #create random song length
+  song_length &lt;- sample(45:300, 1)
+  
+  #iniitalize starting word
+  start_word &lt;- sample(bigrams_separated$word1,1)
+  random_lyrics &lt;- list(start_word)
+  random_lyrics_punc &lt;- list(start_word)
+  
+  print(&quot;Song length is:&quot;)
+  print(song_length)
+  #begin MC
+  for(i in 1:song_length) {
+    #print(random_lyrics)
+    available_words &lt;- bigrams_separated %&gt;% filter(word1 == random_lyrics[[i]]) %&gt;% select(word2)
+    #print(available_words)
+    #if current word is not the start of a bigram, restart markov chain
+    if(nrow(available_words) ==0){
+      
+      random_lyrics[[i+1]] &lt;- sample(bigrams_separated$word1,1)
+      random_lyrics_punc[[i+1]] &lt;- paste(c(&quot;. &quot;,random_lyrics[[i+1]]), collapse = &quot;&quot;)
+    }
+    else{
+      
+      #select next word weighted by conditional probability
+      random_lyrics[[i+1]] &lt;- sample(available_words$word2,1)
+      random_lyrics_punc[[i+1]] &lt;- random_lyrics[[i+1]]
+    }
+  }
+  
+  #cleaner output for mc generation
+  str_c(as_vector(random_lyrics), collapse = &quot; &quot;)
+  
+}
+
+one_step_mc()</code></pre>
+<pre><code>## [1] &quot;Song length is:&quot;
+## [1] 112</code></pre>
+<pre><code>## [1] &quot;rebuild this black steel in irrelevance so still here it&#39;s all that for the number six bars laid across their own skin of the difference is when the children well teach our perimeter we are being herded by the tide it&#39;s hit or swim it&#39;s worth you crawl tied up the ghost waiting for the ground down burn it only duck in his own refrains narcissus improved amp load the pieces to anyone has got to you distorted tore yourself in the dirt you dry under your misery won&#39;t soak up and clocked in two your life can imagine why don&#39;t trust the darkness down a relentless blade unconquered there&#39;s merely a crisis&quot;</code></pre>
+<p>Here are a few more samples using the one step model.</p>
+<pre><code>## [1] &quot;Song length is:&quot;
+## [1] 196</code></pre>
+<pre><code>## [1] &quot;know who&#39;ll know who&#39;ll know the fist in blood smear through the pig you&#39;ll find the catalyst of our darkest hour dirty rig and file you owed me king i&#39;ll split the medicine is more are being herded by a knock on my labour of sticks and i fight i will stick to join all these sins of unhappiness endless supply i rip it a choice by our own words and start the cleansing pray for hypocrites to guide your life&#39;s a falling three times to sink or bliss whatever arrives you i will replace this unborn child resume the empire live a painful truth tired old song i hate and piss hit or bliss whatever arrives you think that i am legion oppression injustice self embrace they&#39;ve got something for your eyes yet how unfair you watch you let it spill on poison air in this disease to the beards of lies filled to the gears of existence draws near judgement day you don&#39;t stop the tools of their rusty shackles forever free a worm in your neck pointing fingers of life or a line my mind enthroned by awaken how can see the pain grotesquely&quot;</code></pre>
+<pre><code>## [1] &quot;Song length is:&quot;
+## [1] 92</code></pre>
+<pre><code>## [1] &quot;hour none my part to rot traces of the real thing straight through hell pray for blood debts all that for your sacrifice you your sacrifice you think not rest with pride your fingers to die the end in the fuck see who you you lost you&#39;re gone the taste of believers who am legion i unleash this so many in the bottle to save there&#39;s no hope it where&#39;d i will be scattered ignite impulse to your knees begging on top of the hive bloated with a flock of this pain there&#39;s&quot;</code></pre>
+<p>The previous model can be further generalized into a two-step model. Thus, instead of conditioning on the previous word, we will condition on the two previous words. Our Markov model will now have the form: <span class="math inline">\(P(word_{n+1}|word_n,...,word_0)=P(word_{n+1}|word_n, word_{n-1})\)</span>.</p>
+<p>The algorithm for the two-step Markov model is as follows:</p>
+<ol style="list-style-type: decimal">
+<li>Initialize the chain with a random word pair,</li>
+<li>Condition on the current word pair,</li>
+</ol>
+<ul>
+<li>if all conditional probabilities are 0, repeat step 1</li>
+<li>else, select the next word at random weighted by the probabilities conditioned on the current word pair and repeat 2</li>
+</ul>
+<ol start="3" style="list-style-type: decimal">
+<li>Do the above steps for some random number of iterations.</li>
+</ol>
+<p>The if/else of part 2 ensure that if the chain hits an absorbing state that it can continue running the for the specified number of iterations.</p>
+<pre class="r"><code>set.seed(1)
+song_length &lt;- sample(45:230, 1)
+
+
+
+#iniitalize starting word
+start_index &lt;- sample(nrow(trigrams_separated),1)
+start_word1 &lt;- as.character(trigrams_separated %&gt;% slice( start_index) %&gt;% select(word1))
+start_word2 &lt;- as.character(trigrams_separated %&gt;% slice( start_index) %&gt;% select(word2))
+random_lyrics &lt;- list(start_word1,start_word2)
+random_lyrics_punc &lt;- random_lyrics
+
+print(&quot;Song length is:&quot;)</code></pre>
+<pre><code>## [1] &quot;Song length is:&quot;</code></pre>
+<pre class="r"><code>song_length</code></pre>
+<pre><code>## [1] 94</code></pre>
+<pre class="r"><code>i &lt;- 1
+while(i &lt;= song_length) {
+  #print(random_lyrics)
+  available_words &lt;- trigrams_separated %&gt;% filter(word1 == random_lyrics[[i]], word2 == random_lyrics[[i+1]]) %&gt;% select(word3)
+  #print(available_words)
+  #if current word is not the start of a bigram, restart markov chain
+  if(nrow(available_words) ==0){
+    index &lt;- sample(nrow(trigrams_separated),1)
+    new_word1 &lt;- as.character(trigrams_separated %&gt;% slice( index) %&gt;% select(word1))
+    new_word2 &lt;- as.character(trigrams_separated %&gt;% slice( index) %&gt;% select(word2))
+    random_lyrics[[i+2]] &lt;- new_word1
+    random_lyrics[[i+3]] &lt;- new_word2
+    #random_lyrics_punc[[i+2]] &lt;- paste(c(&quot;. &quot;,random_lyrics[[i+2]]), collapse = &quot;&quot;)
+    random_lyrics_punc[[i+3]] &lt;- random_lyrics[[i+3]]
+    i &lt;- i + 2
+  }
+  else{
+
+    #select next word weighted by conditional probability
+    random_lyrics[[i+2]] &lt;- sample(available_words$word3,1)
+    random_lyrics_punc[[i+2]] &lt;- random_lyrics[[i+2]]
+    i &lt;- i + 1
+  }
+}
+
+as_vector(random_lyrics_punc)</code></pre>
+<pre><code>##  [1] &quot;apprehension&quot; &quot;blind&quot;        &quot;me&quot;           &quot;dowsing&quot;      &quot;with&quot;        
+##  [6] &quot;escalating&quot;   &quot;tension&quot;      &quot;bury&quot;         &quot;me&quot;           &quot;under&quot;       
+## [11] &quot;your&quot;         &quot;black&quot;        &quot;wings&quot;        &quot;mark&quot;         &quot;my&quot;          
+## [16] &quot;words&quot;        &quot;and&quot;          &quot;then&quot;         &quot;i&#39;m&quot;          &quot;done&quot;        
+## [21] &quot;get&quot;          &quot;the&quot;          &quot;fuck&quot;         &quot;have&quot;         &quot;i&quot;           
+## [26] &quot;called&quot;       &quot;for&quot;          &quot;blood&quot;        &quot;pray&quot;         &quot;for&quot;         
+## [31] &quot;the&quot;          &quot;ghost&quot;        &quot;to&quot;           &quot;bite&quot;         &quot;still&quot;       
+## [36] &quot;spinning&quot;     &quot;in&quot;           &quot;the&quot;          &quot;sky&quot;          &quot;a&quot;           
+## [41] &quot;hole&quot;         &quot;in&quot;           &quot;your&quot;         &quot;sights&quot;       &quot;possessed&quot;   
+## [46] &quot;by&quot;           &quot;the&quot;          &quot;chain&quot;        &quot;of&quot;           &quot;lies&quot;        
+## [51] &quot;you&#39;ve&quot;       &quot;wrapped&quot;      &quot;around&quot;       &quot;you&quot;          &quot;you&#39;re&quot;      
+## [56] &quot;trapped&quot;      &quot;in&quot;           &quot;regression&quot;   &quot;dying&quot;        &quot;in&quot;          
+## [61] &quot;the&quot;          &quot;eye&quot;          &quot;of&quot;           &quot;the&quot;          &quot;truth&quot;       
+## [66] &quot;shall&quot;        &quot;set&quot;          &quot;you&quot;          &quot;free&quot;         &quot;i&#39;ll&quot;        
+## [71] &quot;turn&quot;         &quot;the&quot;          &quot;screws&quot;       &quot;of&quot;           &quot;vengeance&quot;   
+## [76] &quot;and&quot;          &quot;bury&quot;         &quot;you&quot;          &quot;with&quot;         &quot;broken&quot;      
+## [81] &quot;arms&quot;         &quot;there&#39;s&quot;      &quot;poison&quot;       &quot;in&quot;           &quot;her&quot;         
+## [86] &quot;veins&quot;        &quot;but&quot;          &quot;the&quot;          &quot;shelves&quot;      &quot;have&quot;        
+## [91] &quot;all&quot;          &quot;been&quot;         &quot;cleared&quot;      &quot;a&quot;            &quot;thief&quot;       
+## [96] &quot;in&quot;</code></pre>
+<pre><code>## [1] &quot;Song length is:&quot;</code></pre>
+<pre><code>## [1] 71</code></pre>
+<pre><code>##  [1] &quot;is&quot;        &quot;not&quot;       &quot;the&quot;       &quot;life&quot;      &quot;i&quot;         &quot;am&quot;       
+##  [7] &quot;not&quot;       &quot;afraid&quot;    &quot;to&quot;        &quot;speak&quot;     &quot;the&quot;       &quot;truth&quot;    
+## [13] &quot;shall&quot;     &quot;set&quot;       &quot;you&quot;       &quot;free&quot;      &quot;i&#39;ll&quot;      &quot;turn&quot;     
+## [19] &quot;the&quot;       &quot;screws&quot;    &quot;of&quot;        &quot;vengeance&quot; &quot;and&quot;       &quot;bury&quot;     
+## [25] &quot;you&quot;       &quot;with&quot;      &quot;hate&quot;      &quot;deify&quot;     &quot;no&quot;        &quot;one&quot;      
+## [31] &quot;is&quot;        &quot;coming&quot;    &quot;to&quot;        &quot;save&quot;      &quot;there&#39;s&quot;   &quot;no&quot;       
+## [37] &quot;one&quot;       &quot;is&quot;        &quot;coming&quot;    &quot;to&quot;        &quot;an&quot;        &quot;end&quot;      
+## [43] &quot;no&quot;        &quot;empty&quot;     &quot;threat&quot;    &quot;this&quot;      &quot;time&quot;      &quot;so&quot;       
+## [49] &quot;sweetly&quot;   &quot;she&quot;       &quot;sucks&quot;     &quot;away&quot;      &quot;at&quot;        &quot;my&quot;       
+## [55] &quot;jokes&quot;     &quot;the&quot;       &quot;punchline&quot; &quot;is&quot;        &quot;murder&quot;    &quot;don&#39;t&quot;    
+## [61] &quot;enjoy&quot;     &quot;my&quot;        &quot;touch&quot;     &quot;every&quot;     &quot;caress&quot;    &quot;hides&quot;    
+## [67] &quot;a&quot;         &quot;chokehold&quot; &quot;i&#39;m&quot;       &quot;only&quot;      &quot;happy&quot;     &quot;when&quot;     
+## [73] &quot;i&#39;ve&quot;</code></pre>
+<div id="lets-make-a-deal" class="section level2">
+<h2>Let’s Make a Deal</h2>
+<center>
+<div class="figure">
+<img src="https://res.cloudinary.com/zeucebag/image/upload/v1575992209/monty_hall_mbttva.jpg" alt="" />
+<p class="caption">The famous Monty Hall from Let’s Make a Deal</p>
+</div>
+</center>
+<p>Having generated 6 sets of random lyrics, 3 using a one-step model and 3 using a two-step model, what is the verdict? Without having a formal metric for evaluation, I thought it would be fun to compare actual lyrics with (slightly curated) model generated lyrics and let the user pick which one is real and which is fake. So, are you ready to make a deal?</p>
+<div id="take-a-guess" class="section level3">
+<h3>Take a Guess</h3>
+<strong>Is 1 Real?</strong>
+<center>
+<p>Blind me, dowsing with escalating tension.</p>
+<p>Bury me, under your black wings.</p>
+<p>Jacked up,</p>
+<p>and it sure as hell ain’t the lucky one son.</p>
+<p>Get one thing straight,</p>
+<p>from the get go I truly don’t give a f**k.</p>
+<p>Sink or swim,</p>
+<p>and it’s all coming down now.</p>
+</center>
+<strong>Or is 2 Real?</strong>
+<center>
+<p>They finally shoved you in the box</p>
+<p>they could never fit you in.</p>
+<p>An empty cell forever locked.</p>
+<p>So much for best intentions,</p>
+<p>but some will load the gun.</p>
+<p>And some will hone the knife.</p>
+<p>Some will raise the fist,</p>
+<p>as they recall your life.</p>
+</center>
+<p>These are supposed the be song lyrics, and yet fall very short of the structure that comes with song lyrics. There is no evident song structure, such as verse-chorus-verse-chorus-bridge-chorus-outre, that would be customary for a song to have. Furthermore, songs tend to have rhyming schemes, which is again absent from the samples generated. This also suggests that our Markov assumption may not be sufficient for the context of generating song lyrics.</p>
+</div>
+</div>
+</div>
+<div id="summary" class="section level1">
+<h1>Summary</h1>
+<p>We have taken a lengthy trip through the realm of text mining, exploring several techniques for analyzing, visualizing, and generating text, all in the context of analyzing song lyrics. Personally, this project was a tremendous amount of fun, and is was very exciting to learn more about the lyrics of a band I have been following for years, and I hope the reader will feel the same by the end.</p>
+</div>

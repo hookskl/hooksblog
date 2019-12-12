@@ -3,32 +3,19 @@ title: Welcome!
 author: Kyle
 date: '2018-01-03'
 slug: 
-categories: ["R"]
-tags: []
+categories: ["blog","introduction"]
+tags: ["math", "stats", "R", "probability"]
 autoThumbnailImage: false
 thumbnailImagePosition: "top"
 thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,e_auto_brightness,w_868/v1515104336/ZULU_-_WIN_20180104_171619_svwuod.jpg
-coverImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,e_auto_brightness,w_868/v1515104336/ZULU_-_WIN_20180104_171619_svwuod.jpg
+#coverImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,e_auto_brightness,w_868/v1515104336/ZULU_-_WIN_20180104_171619_svwuod.jpg
 metaAlignment: center
 coverMeta: out
+comments: no
 ---
 
-This is a test
+Welcome to my blog! Take a look around and thanks for stopping by!
 
 
-
-$\begin{eqnarray}
-X & \sim & \mathrm{N}(0,1)\\
-Y & \sim & \chi^2_{n-p}\\
-R & \equiv & X/Y \sim t_{n-p}
-\end{eqnarray}$
-
-
-
-
-```{r}
-print('Hello World')
-
-```
 
 
