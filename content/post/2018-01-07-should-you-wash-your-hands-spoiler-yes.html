@@ -1,0 +1,345 @@
+---
+title: 'Should you wash your hands? (Spoiler: Yes)'
+author: Kyle
+date: '2018-01-07'
+slug: should-you-wash-your-hands-spoiler-yes
+categories: ["data analysis"]
+tags:
+  - R
+  - stats
+clearReading: true
+autoThumbnailImage: false
+thumbnailImagePosition: "top"
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,w_565/v1515383136/ZULU_-_WIN_20180107_224322_kw5mj7.jpg
+coverImage: //res.cloudinary.com/zeucebag/image/upload/v1515357115/semmelweis-ignaz-image_lutnq8.jpg
+coverSize: partial
+coverCaption: Dr. Semmelweis judging those who don't wash their hands.
+metaAlignment: center
+coverMeta: out
+comments: no
+description:  "Using data and statistics to support why washing your hands is a good thing."
+---
+
+
+
+<p>Hand washing. It’s something we were all told to do growing up. Playing outside? Go wash your hands. Using the restroom? Wash your hands. Did you just handle raw chicken? Go.Wash.Your.Hands.</p>
+<p>But where did it come from? And does it actually work? In this post we’ll discuss the historical origins of hand washing and then use some data to see if we can come to the same conclusion.</p>
+<!--more-->
+<p>#The Doctor#</p>
+<p>Dr. Ignaz Semmelweis, was a Hungarian physician born in 1818 and credited as one an early pioneer of antiseptic procedures, which among other things, included doctors washing their hands.</p>
+<p>Retrospectively, this seems ghastly that one could go to a clinic for medical treatment where no sanitation standards existed, but this was the norm. In fact, Dr. Semmelweis’ proposals for higher sanitation standards were seen as offensive to other doctors! (It didn’t help that at that time, Dr. Semmelweis could not provide any scientific evidence for his claims.)</p>
+<p>#Childbed Fever and a Tale of Two Clinics#</p>
+<p>Part of Semmelweis’ career, and that which was instrumental in his findings, was his time at the First Obstetrical Clinic of Vienna General Hospital. Here, there were two maternity clinics, where the only difference between the two was staff in charge of assisting in child birth. The first clinic (Clinic 1) was primarily composed of medical students for the purpose of teaching, whereas the second clinic (Clinic 2) was for the instruction of midwives only.</p>
+<p>Well, there is actually one more difference. Clinic 1 had an average patient mortality rate of 10% due to childbed fever (Puerperal fever) as compared to a much lower average mortality rate of less than 4%. This greatly troubled Semmelweis, who was quoted as saying</p>
+<blockquote>
+<p>it made me so miserable that life seemed worthless.</p>
+</blockquote>
+<p>After a great effort to systematically remove practices that could potentially cause this disparity, he finally concluded the medical students were the cause due to their routine of conducting autopsies and then bringing “cadaverous material” to patients in the maternity clinic. This lead to a form of hand washing between autopsy work and patient examination, which in turn caused a 90% drop in mortality rate at Clinic 1!</p>
+<p>#Analysis#</p>
+<p>Armed with these insights we shall take a look at the data from the clinics and see if we can provide evidence for Dr. Semmelweis’ discovery. We’ll look at two data sets, one that has the yearly mortality rates from both clinics and another that has the monthly mortality rates from just clinic 1.</p>
+<p>First, we will look at the yearly data set.</p>
+<pre><code>## Warning: package &#39;readr&#39; was built under R version 3.4.4</code></pre>
+<pre><code>## Warning: package &#39;stringr&#39; was built under R version 3.4.4</code></pre>
+<pre><code>## Warning: package &#39;forcats&#39; was built under R version 3.4.4</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">year</th>
+<th align="right">births</th>
+<th align="right">deaths</th>
+<th align="left">clinic</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1841</td>
+<td align="right">3036</td>
+<td align="right">237</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="even">
+<td align="right">1842</td>
+<td align="right">3287</td>
+<td align="right">518</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="odd">
+<td align="right">1843</td>
+<td align="right">3060</td>
+<td align="right">274</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="even">
+<td align="right">1844</td>
+<td align="right">3157</td>
+<td align="right">260</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="odd">
+<td align="right">1845</td>
+<td align="right">3492</td>
+<td align="right">241</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="even">
+<td align="right">1846</td>
+<td align="right">4010</td>
+<td align="right">459</td>
+<td align="left">clinic 1</td>
+</tr>
+<tr class="odd">
+<td align="right">1841</td>
+<td align="right">2442</td>
+<td align="right">86</td>
+<td align="left">clinic 2</td>
+</tr>
+<tr class="even">
+<td align="right">1842</td>
+<td align="right">2659</td>
+<td align="right">202</td>
+<td align="left">clinic 2</td>
+</tr>
+<tr class="odd">
+<td align="right">1843</td>
+<td align="right">2739</td>
+<td align="right">164</td>
+<td align="left">clinic 2</td>
+</tr>
+<tr class="even">
+<td align="right">1844</td>
+<td align="right">2956</td>
+<td align="right">68</td>
+<td align="left">clinic 2</td>
+</tr>
+<tr class="odd">
+<td align="right">1845</td>
+<td align="right">3241</td>
+<td align="right">66</td>
+<td align="left">clinic 2</td>
+</tr>
+<tr class="even">
+<td align="right">1846</td>
+<td align="right">3754</td>
+<td align="right">105</td>
+<td align="left">clinic 2</td>
+</tr>
+</tbody>
+</table>
+<p>Let’s add the proportion of deaths so we get a better sense of what these numbers mean.</p>
+<pre class="r"><code>yearly &lt;- yearly %&gt;%
+    mutate(proportion_deaths = deaths / births)</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="right">year</th>
+<th align="right">births</th>
+<th align="right">deaths</th>
+<th align="left">clinic</th>
+<th align="right">proportion_deaths</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1841</td>
+<td align="right">3036</td>
+<td align="right">237</td>
+<td align="left">clinic 1</td>
+<td align="right">0.0780632</td>
+</tr>
+<tr class="even">
+<td align="right">1842</td>
+<td align="right">3287</td>
+<td align="right">518</td>
+<td align="left">clinic 1</td>
+<td align="right">0.1575905</td>
+</tr>
+<tr class="odd">
+<td align="right">1843</td>
+<td align="right">3060</td>
+<td align="right">274</td>
+<td align="left">clinic 1</td>
+<td align="right">0.0895425</td>
+</tr>
+<tr class="even">
+<td align="right">1844</td>
+<td align="right">3157</td>
+<td align="right">260</td>
+<td align="left">clinic 1</td>
+<td align="right">0.0823567</td>
+</tr>
+<tr class="odd">
+<td align="right">1845</td>
+<td align="right">3492</td>
+<td align="right">241</td>
+<td align="left">clinic 1</td>
+<td align="right">0.0690149</td>
+</tr>
+<tr class="even">
+<td align="right">1846</td>
+<td align="right">4010</td>
+<td align="right">459</td>
+<td align="left">clinic 1</td>
+<td align="right">0.1144638</td>
+</tr>
+<tr class="odd">
+<td align="right">1841</td>
+<td align="right">2442</td>
+<td align="right">86</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0352170</td>
+</tr>
+<tr class="even">
+<td align="right">1842</td>
+<td align="right">2659</td>
+<td align="right">202</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0759684</td>
+</tr>
+<tr class="odd">
+<td align="right">1843</td>
+<td align="right">2739</td>
+<td align="right">164</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0598759</td>
+</tr>
+<tr class="even">
+<td align="right">1844</td>
+<td align="right">2956</td>
+<td align="right">68</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0230041</td>
+</tr>
+<tr class="odd">
+<td align="right">1845</td>
+<td align="right">3241</td>
+<td align="right">66</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0203641</td>
+</tr>
+<tr class="even">
+<td align="right">1846</td>
+<td align="right">3754</td>
+<td align="right">105</td>
+<td align="left">clinic 2</td>
+<td align="right">0.0279702</td>
+</tr>
+</tbody>
+</table>
+<p>Yikes! Just eyeballing the last column indicates a significant disparity between the two clinics. Plotting the rates over time will give us an even better idea of this disparity.</p>
+<pre class="r"><code>ggplot(yearly, aes(x=year, y=proportion_deaths, color=clinic)) + 
+  geom_line() + 
+  labs(x=&quot;Date&quot;, y=&quot;Proportion of Deaths&quot;) + 
+  theme_bw()</code></pre>
+<p><img src="/post/2018-01-07-should-you-wash-your-hands-spoiler-yes_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>From this plot it is quite clear that clinic 1 really does have some issues. Let’s dive deeper and explore the monthly data for just clinic 1.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">date</th>
+<th align="right">births</th>
+<th align="right">deaths</th>
+<th align="right">proportion_deaths</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">1841-01-01</td>
+<td align="right">254</td>
+<td align="right">37</td>
+<td align="right">0.1456693</td>
+</tr>
+<tr class="even">
+<td align="left">1841-02-01</td>
+<td align="right">239</td>
+<td align="right">18</td>
+<td align="right">0.0753138</td>
+</tr>
+<tr class="odd">
+<td align="left">1841-03-01</td>
+<td align="right">277</td>
+<td align="right">12</td>
+<td align="right">0.0433213</td>
+</tr>
+<tr class="even">
+<td align="left">1841-04-01</td>
+<td align="right">255</td>
+<td align="right">4</td>
+<td align="right">0.0156863</td>
+</tr>
+<tr class="odd">
+<td align="left">1841-05-01</td>
+<td align="right">255</td>
+<td align="right">2</td>
+<td align="right">0.0078431</td>
+</tr>
+<tr class="even">
+<td align="left">1841-06-01</td>
+<td align="right">200</td>
+<td align="right">10</td>
+<td align="right">0.0500000</td>
+</tr>
+</tbody>
+</table>
+<p>The monthly data spans what could be called two eras: the time before hand washing and the time after. Let’s plot the data and see if anything sticks out.</p>
+<pre class="r"><code>ggplot(monthly, aes(x=date, y=proportion_deaths)) + 
+  geom_line() + 
+  labs(x=&quot;Date&quot;, y=&quot;Proportion of Deaths&quot;) + 
+  theme_bw()</code></pre>
+<p><img src="/post/2018-01-07-should-you-wash-your-hands-spoiler-yes_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>Hmmm…it looks like there might have been an effect, can you guess when Dr. Semmelweis started to require hand washing?</p>
+<pre class="r"><code>handwashing_start = as.Date(&#39;1847-06-01&#39;)
+
+
+monthly &lt;- monthly %&gt;%
+                mutate(handwashing_started = date &gt;= handwashing_start)
+
+
+monthly %&gt;%
+    ggplot(aes(x=date, y=proportion_deaths, color=handwashing_started)) + 
+    geom_line() + 
+    geom_vline(xintercept = handwashing_start, linetype = &quot;dashed&quot;) + 
+    labs(x=&quot;Date&quot;, y=&quot;Proportion of Deaths&quot;) + 
+    theme_bw()</code></pre>
+<p><img src="/post/2018-01-07-should-you-wash-your-hands-spoiler-yes_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>No surprise right? It seems pretty clear that hand washing had some sort of impact after being instituted. Now we’ll summarize the average rates for the two eras and compare them.</p>
+<pre class="r"><code>monthly %&gt;% 
+  group_by(handwashing_started) %&gt;%
+  summarise(mean_proportion_deaths = mean(proportion_deaths)) %&gt;%
+  knitr::kable()</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">handwashing_started</th>
+<th align="right">mean_proportion_deaths</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">FALSE</td>
+<td align="right">0.1050500</td>
+</tr>
+<tr class="even">
+<td align="left">TRUE</td>
+<td align="right">0.0210934</td>
+</tr>
+</tbody>
+</table>
+<p>Again, it seems very likely that hand washing has saved the lives of many individuals. Finally, we can perform a hypothesis test on whether the mean proportions of the two eras differ significantly.</p>
+<p>Formally,</p>
+<p><span class="math display">\[H_o: \mu_{before} - \mu_{after} = 0 \]</span>
+<span class="math display">\[H_1: \mu_{before} - \mu_{after} &gt; 0\]</span></p>
+<p>which basically boils down to the mean proportion rate of deaths decreased significantly after hand washing was required.</p>
+<p>Performing the test,</p>
+<pre class="r"><code>t.test( proportion_deaths ~ handwashing_started, data = monthly, alternative = &quot;greater&quot;)</code></pre>
+<pre><code>## 
+##  Welch Two Sample t-test
+## 
+## data:  proportion_deaths by handwashing_started
+## t = 9.6101, df = 92.435, p-value = 7.226e-16
+## alternative hypothesis: true difference in means is greater than 0
+## 95 percent confidence interval:
+##  0.06944117        Inf
+## sample estimates:
+## mean in group FALSE  mean in group TRUE 
+##          0.10504998          0.02109338</code></pre>
+<p>we see there is in fact strong statistical evidence to conclude hand washing did in fact reduce mortality rates at Clinic 1. Moral of the story, wash your hands you filthy animal!</p>

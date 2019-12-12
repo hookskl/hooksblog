@@ -1,0 +1,152 @@
+---
+title: A Survey of Kagglers
+author: Kyle Hooks
+date: '2018-02-12'
+slug: a-survey-of-kagglers
+categories:
+  - data analysis
+tags:
+  - R
+  
+clearReading: true
+autoThumbnailImage: false
+thumbnailImagePosition: "top"
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,w_421/a_360/v1518447856/20180212_095241_cokjks.jpg
+coverSize: partial
+metaAlignment: center
+coverMeta: out
+comments: no
+description:  "Answering the question, what tools to Kagglers use?"
+---
+
+**Kaggle**
+
+[Kaggle](https://www.kaggle.com/) is an online platform and community devoted to hosting machine learning competitions. Some competitions are just for learning, while others have a cash prize to those who yield the model with the best predictions by the deadline.
+
+In 2017, Kaggle conducted an industry-wide survey to get a better sense of the data science and machine learning community at large. With over 16,000 respondents, there is a lot of information to dig through. For this post, we'll explore a small subset of the survey to get a feel for programming language preferences among the respondents.
+
+**The Survey**
+
+As part of the survey, respondents were asked to fill out 228 multiple choice questions and a free response section. For now, we'll stick to the multiple choice portion. All of the data sets can be found [here](https://www.kaggle.com/kaggle/kaggle-survey-2017/data).
+
+
+```{r message = FALSE, warning=FALSE}
+library(tidyverse)
+
+# Read in multiple choice data 
+mc_data <- read_csv('data/kaggle/multipleChoiceResponses.csv')
+
+```
+
+The multiple question survey includes several interesting pieces of demographics information such as job title, gender, current residence and much more. For me, one question I'm very interested in answering is what programming languages do professionals use. The so called debate of "R vs. Python" is almost a trope at this point, but there's still merit in having an idea of what users prefer at a given point in time.
+
+
+Let's take a look at a subset of the survey, particularly the tools used, languages recommended, industry of work, and the types of algorithms the respondent commonly uses.
+
+```{r}
+mc_subset <- mc_data %>%
+  select(WorkToolsSelect, LanguageRecommendationSelect, EmployerIndustry, WorkAlgorithmsSelect) %>%
+# Add respondent id for later
+  mutate(Respondent = row_number())
+
+head(mc_subset)
+```
+
+Looking at the work tools column, we can see it's a bit of a mess where each user's tools are all in one cell. To remedy this, let's create a new column and split the tools up so each row corresponds to one tool used by the respondent.
+
+```{r}
+# Printing the first respondents' tools and languages
+mc_subset$WorkToolsSelect[1]
+
+# Create new dataset adding a new column which splits the WorkToolsSelect column at the commas and unnests the new column
+tools <- mc_subset  %>% 
+# Remove NA's
+    filter(!is.na(WorkToolsSelect)) %>%
+    mutate(work_tools = strsplit(as.character(WorkToolsSelect), ",")) %>%
+    unnest(work_tools)
+
+# Viewing the first 6 rows of tools
+head(tools)
+```
+
+Now that everything is in a more manageable format we can plot the frequency of tools used.
+```{r}
+# My fav ggplot2 theme
+theme_set(theme_bw())
+# Grouping the data by work_tools, calculate the number of responses in each group
+tools  %>% 
+    group_by(work_tools)  %>% 
+    summarise(n=n()) %>%
+# Sorting tool_count so that the most popular tools are at the top
+    arrange(desc(n)) %>%
+# Arranging the bars so that the tallest are on the far right
+    ggplot(aes(x= reorder(work_tools, n), y = n, fill = work_tools)) + 
+    geom_bar(stat="identity") +
+    xlab("Work Tools") +
+    ylab("Frequency of Tools Used") +
+# Rotating the bar labels 90 degrees
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))  + 
+# Remove color legend
+    theme(legend.position='none')
+```
+Seeing Python, R, and SQL as the most popular isn't very surprising. I am however very surprised to see Excel above so many others. Excel is one of those tools everyone in the data science community enjoys evangelizing as awful for analytics (with good reason in my opinion) but it appears to still have its uses.
+
+But as I said earlier, the REAL question is who uses Python and/or R.
+```{r}
+# Creating a new column called language preference
+debate_tools <- mc_subset  %>% 
+# Remove no responses
+   filter(!is.na(WorkToolsSelect)) %>%
+# Label users by R and Python preferences
+   mutate(language_preference = case_when(
+     grepl("R", WorkToolsSelect) & !grepl("Python", WorkToolsSelect) ~ "R",
+     !grepl("R", WorkToolsSelect) & grepl("Python", WorkToolsSelect) ~ "Python",
+     grepl("R", WorkToolsSelect) & grepl("Python", WorkToolsSelect) ~ "Both",
+     !grepl("R", WorkToolsSelect) & !grepl("Python", WorkToolsSelect) ~ "Neither"))
+
+# Printing the first 6 rows
+head(debate_tools)
+```
+
+With the new data frame of language preferences let's plot the results.
+```{r}
+# Grouping by language preference and calculate number of responses
+debate_tools  %>% 
+    group_by(language_preference)  %>% 
+    summarise(n = n())  %>% 
+# Creating a bar chart
+    ggplot(aes(x=reorder(language_preference,n), y = n, fill = language_preference)) + 
+    geom_bar(stat = 'identity') + 
+    xlab("Language Preference") +
+    ylab("Frequency") +
+    theme(legend.position='none')
+```
+
+So it seems by in large using one lanugage isn't mutually exclusive to the other. This feels right to me from my time learning about the two languages. Anytime I see a thread with the title "Which language should I use", there's always a large amount of responses giving the pros and cons of both languages. 
+
+The just Python count being nearly double R also seems in line with my own personal experience. Python is by design a more general purpose language than R (although both are Turing complete before I get yelled at), so if you're in the business of doing analytics and putting it into production, Python tends to be more attractive.
+
+To wrap up we'll peek at what users recommend based on their own R and Python preference. We'll limit it to the 10 most common recommendations of each to keep things clean.
+```{r}
+# Grouping by language_preference and then LanguageRecommendationSelect
+debate_tools  %>% 
+    group_by(language_preference, LanguageRecommendationSelect)  %>% 
+    summarise(n = n()) %>%
+# Removing empty responses and include the top recommendations
+    filter(LanguageRecommendationSelect != 'NA') %>%
+    arrange(desc(n)) %>%
+    mutate(row_number = row_number()) %>%
+    filter(row_number <= 10) %>%
+# Creating a faceted bar plot
+    ggplot(aes(x = LanguageRecommendationSelect, y = n, fill = LanguageRecommendationSelect)) + 
+    geom_bar(stat='identity') + 
+    facet_wrap(~language_preference) + 
+    xlab("Language Recommended by Language Preference") +
+    ylab("Frequency") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    theme(legend.position ='none')
+```
+
+Here we have an overwhelming majority for Python. It would be interesting to dive deeper and see why the big disparity. My guess would be R gets a bad rap for a steep learning curve and inconsistent syntax, but recently this is becoming less of an issue (tidyverse ftw!).
+
+Next time we'll explore the survey further and see if language preferences have any relationship with salaries.

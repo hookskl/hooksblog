@@ -1,0 +1,150 @@
+---
+title: 'Should you wash your hands? (Spoiler: Yes)'
+author: Kyle
+date: '2018-01-07'
+slug: should-you-wash-your-hands-spoiler-yes
+categories: ["data analysis"]
+tags:
+  - R
+  - stats
+clearReading: true
+autoThumbnailImage: false
+thumbnailImagePosition: "top"
+thumbnailImage: //res.cloudinary.com/zeucebag/image/upload/c_scale,w_565/v1515383136/ZULU_-_WIN_20180107_224322_kw5mj7.jpg
+coverImage: //res.cloudinary.com/zeucebag/image/upload/v1515357115/semmelweis-ignaz-image_lutnq8.jpg
+coverSize: partial
+coverCaption: Dr. Semmelweis judging those who don't wash their hands.
+metaAlignment: center
+coverMeta: out
+comments: no
+description:  "Using data and statistics to support why washing your hands is a good thing."
+---
+
+Hand washing. It's something we were all told to do growing up. Playing outside? Go wash your hands. Using the restroom? Wash your hands. Did you just handle raw chicken? Go.Wash.Your.Hands.
+
+But where did it come from? And does it actually work? In this post we'll discuss the historical origins of hand washing and then use some data to see if we can come to the same conclusion.
+
+
+<!--more-->
+
+
+
+
+#The Doctor#
+
+Dr. Ignaz Semmelweis, was a Hungarian physician born in 1818 and credited as one an early pioneer of antiseptic procedures, which among other things, included doctors washing their hands. 
+
+Retrospectively, this seems ghastly that one could go to a clinic for medical treatment where no sanitation standards existed, but this was the norm. In fact, Dr. Semmelweis' proposals for higher sanitation standards were seen as offensive to other doctors! (It didn't help that at that time, Dr. Semmelweis could not provide any scientific evidence for his claims.)
+
+#Childbed Fever and a Tale of Two Clinics#
+
+Part of Semmelweis' career, and that which was instrumental in his findings, was his time at the First Obstetrical Clinic of Vienna General Hospital. Here, there were two maternity clinics, where the only difference between the two was staff in charge of assisting in child birth. The first clinic (Clinic 1) was primarily composed of medical students for the purpose of teaching, whereas the second clinic (Clinic 2) was for the instruction of midwives only. 
+
+Well, there is actually one more difference. Clinic 1 had an average patient mortality rate of 10% due to childbed fever (Puerperal fever) as compared to a much lower average mortality rate of less than 4%. This greatly troubled Semmelweis, who was quoted as saying 
+
+> it made me so miserable that life seemed worthless.
+
+After a great effort to systematically remove practices that could potentially cause this disparity, he finally concluded the medical students were the cause due to their routine of conducting autopsies and then bringing "cadaverous material" to patients in the maternity clinic. This lead to a form of hand washing between autopsy work and patient examination, which in turn caused a 90% drop in mortality rate at Clinic 1!
+
+#Analysis#
+
+Armed with these insights we shall take a look at the data from the clinics and see if we can provide evidence for Dr. Semmelweis' discovery. We'll look at two data sets, one that has the yearly mortality rates from both clinics and another that has the monthly mortality rates from just clinic 1.
+
+First, we will look at the yearly data set.
+
+```{r message = FALSE, echo=FALSE}
+library(tidyverse)
+
+yearly <- read.csv("data/yearly_deaths_by_clinic.csv")
+knitr::kable(yearly)
+
+```
+
+
+Let's add the proportion of deaths so we get a better sense of what these numbers mean.
+
+```{r}
+yearly <- yearly %>%
+    mutate(proportion_deaths = deaths / births)
+```
+
+
+```{r echo = FALSE}
+knitr::kable(yearly)
+```
+
+
+Yikes! Just eyeballing the last column indicates a significant disparity between the two clinics. Plotting the rates over time will give us an even better idea of this disparity.
+
+
+```{r}
+ggplot(yearly, aes(x=year, y=proportion_deaths, color=clinic)) + 
+  geom_line() + 
+  labs(x="Date", y="Proportion of Deaths") + 
+  theme_bw()
+```
+
+From this plot it is quite clear that clinic 1 really does have some issues. Let's dive deeper and explore the monthly data for just clinic 1.
+
+```{r message = FALSE, echo = FALSE}
+monthly <- read_csv("data/monthly_deaths.csv")
+
+monthly <- monthly %>% mutate(proportion_deaths = deaths / births)
+knitr::kable(head(monthly))
+```
+
+The monthly data spans what could be called two eras: the time before hand washing and the time after. Let's plot the data and see if anything sticks out.
+
+
+```{r}
+ggplot(monthly, aes(x=date, y=proportion_deaths)) + 
+  geom_line() + 
+  labs(x="Date", y="Proportion of Deaths") + 
+  theme_bw()
+```
+
+Hmmm...it looks like there might have been an effect, can you guess when Dr. Semmelweis started to require hand washing?
+
+```{r}
+
+handwashing_start = as.Date('1847-06-01')
+
+
+monthly <- monthly %>%
+                mutate(handwashing_started = date >= handwashing_start)
+
+
+monthly %>%
+    ggplot(aes(x=date, y=proportion_deaths, color=handwashing_started)) + 
+    geom_line() + 
+    geom_vline(xintercept = handwashing_start, linetype = "dashed") + 
+    labs(x="Date", y="Proportion of Deaths") + 
+    theme_bw()
+```
+
+
+No surprise right? It seems pretty clear that hand washing had some sort of impact after being instituted. Now we'll summarize the average rates for the two eras and compare them.
+
+```{r}
+monthly %>% 
+  group_by(handwashing_started) %>%
+  summarise(mean_proportion_deaths = mean(proportion_deaths)) %>%
+  knitr::kable()
+```
+
+Again, it seems very likely that hand washing has saved the lives of many individuals. Finally, we can perform a hypothesis test on whether the mean proportions of the two eras differ significantly.
+
+Formally, 
+
+$$H_o: \mu_{before} - \mu_{after} = 0 $$
+$$H_1: \mu_{before} - \mu_{after} > 0$$
+
+which basically boils down to the mean proportion rate of deaths decreased significantly after hand washing was required. 
+
+Performing the test,
+
+```{r}
+t.test( proportion_deaths ~ handwashing_started, data = monthly, alternative = "greater")
+```
+
+we see there is in fact strong statistical evidence to conclude hand washing did in fact reduce mortality rates at Clinic 1. Moral of the story, wash your hands you filthy animal!
